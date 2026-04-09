@@ -1,12 +1,11 @@
 "use client";
 
-// Remotion Player wrapper for Next.js
 import { Player, PlayerRef } from "@remotion/player";
 import { useRef, useCallback, useState, useEffect } from "react";
 import { CodeVideo } from "./CodeVideo";
 import type { CodeThemeName, BackgroundName } from "./CodeVideo";
 import { Button } from "@/components/ui/button";
-import { Download, Play, Pause, RotateCcw } from "lucide-react";
+import { Download, Play, Pause, RotateCcw, Loader2 } from "lucide-react";
 
 interface RemotionPlayerProps {
   code: string;
@@ -40,19 +39,21 @@ export function RemotionPlayer({
   onDurationChange,
 }: RemotionPlayerProps) {
   const playerRef = useRef<PlayerRef>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [exportStatus, setExportStatus] = useState("");
   
   // Calculate duration based on code length and typing speed
   const fps = 30;
-  const safeTypingSpeed = typingSpeed || 25;
-  const safeHoldTime = holdTime ?? 2;
-  const safeCodeLength = code?.length || 1;
+  const safeTypingSpeed = Math.max(1, typingSpeed || 25);
+  const safeHoldTime = Math.max(0, holdTime ?? 2);
+  const safeCodeLength = Math.max(1, code?.length || 1);
   
-  const typingDuration = Math.ceil((safeCodeLength / safeTypingSpeed) * fps);
-  const holdDuration = Math.ceil(fps * safeHoldTime);
-  const durationInFrames = Math.max(1, typingDuration + holdDuration) || 60;
+  const typingDuration = Math.max(1, Math.ceil((safeCodeLength / safeTypingSpeed) * fps));
+  const holdDuration = Math.max(0, Math.ceil(fps * safeHoldTime));
+  const durationInFrames = Math.max(30, typingDuration + holdDuration);
   
   useEffect(() => {
     if (onDurationChange) {
@@ -76,51 +77,31 @@ export function RemotionPlayer({
     setIsPlaying(false);
   }, []);
   
-  // Export to MP4 using MediaRecorder (WebM) + canvas
+  // Export using html2canvas + MediaRecorder
   const handleExport = useCallback(async () => {
-    if (isExporting) return;
+    if (isExporting || !playerContainerRef.current) return;
     
     setIsExporting(true);
     setExportProgress(0);
+    setExportStatus("Preparing export...");
     
     try {
-      // Get the player container
-      const playerContainer = document.querySelector('[data-remotion-player]') as HTMLElement;
-      if (!playerContainer) throw new Error("Player not found");
+      // Dynamic import html2canvas
+      const html2canvas = (await import("html2canvas")).default;
       
-      // Create a canvas to capture frames
-      const canvas = document.createElement("canvas");
-      canvas.width = 1080;
-      canvas.height = 1920;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Canvas context not available");
+      // Create offscreen canvas for recording
+      const recordCanvas = document.createElement("canvas");
+      recordCanvas.width = 1080;
+      recordCanvas.height = 1920;
+      const recordCtx = recordCanvas.getContext("2d");
+      if (!recordCtx) throw new Error("Canvas context not available");
       
-      // Use MediaRecorder with canvas stream
-      const stream = canvas.captureStream(fps);
-      
-      // Add audio if music is enabled
-      if (musicEnabled) {
-        try {
-          const audioElement = document.querySelector("audio") as HTMLAudioElement;
-          if (audioElement) {
-            const audioCtx = new AudioContext();
-            const source = audioCtx.createMediaElementSource(audioElement);
-            const destination = audioCtx.createMediaStreamDestination();
-            source.connect(destination);
-            source.connect(audioCtx.destination);
-            
-            destination.stream.getAudioTracks().forEach(track => {
-              stream.addTrack(track);
-            });
-          }
-        } catch {
-          // Audio capture not available
-        }
-      }
+      // Setup MediaRecorder
+      const stream = recordCanvas.captureStream(fps);
       
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: "video/webm;codecs=vp9",
-        videoBitsPerSecond: 8000000,
+        videoBitsPerSecond: 10000000, // 10 Mbps for high quality
       });
       
       const chunks: Blob[] = [];
@@ -134,35 +115,74 @@ export function RemotionPlayer({
         };
       });
       
-      mediaRecorder.start();
+      mediaRecorder.start(100); // Collect data every 100ms
       
       // Reset to start
       playerRef.current?.seekTo(0);
+      await new Promise(r => setTimeout(r, 100));
+      
+      setExportStatus("Capturing frames...");
       
       // Capture frames
       const totalFrames = durationInFrames;
+      const frameDelay = 1000 / fps;
+      
       for (let i = 0; i < totalFrames; i++) {
+        // Seek to frame
         playerRef.current?.seekTo(i);
         
-        // Wait for frame to render
-        await new Promise(resolve => setTimeout(resolve, 1000 / fps));
+        // Wait for render
+        await new Promise(r => setTimeout(r, frameDelay));
         
         // Capture the player content
-        const playerElement = playerRef.current?.getContainerNode();
+        const playerElement = playerContainerRef.current?.querySelector('[data-remotion-player-content]') as HTMLElement 
+          || playerContainerRef.current?.firstChild as HTMLElement;
+        
         if (playerElement) {
-          // Use html2canvas alternative - draw scaled content
-          ctx.fillStyle = "#000";
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Draw frame indicator for demo (actual implementation would capture DOM)
-          ctx.fillStyle = "#fff";
-          ctx.font = "48px monospace";
-          ctx.fillText(`Frame ${i + 1}/${totalFrames}`, 100, 100);
+          try {
+            const capturedCanvas = await html2canvas(playerElement, {
+              backgroundColor: null,
+              scale: 2, // Higher quality
+              logging: false,
+              useCORS: true,
+              allowTaint: true,
+              width: playerElement.offsetWidth,
+              height: playerElement.offsetHeight,
+            });
+            
+            // Draw to record canvas, scaling to 1080x1920
+            recordCtx.fillStyle = "#000";
+            recordCtx.fillRect(0, 0, 1080, 1920);
+            
+            // Calculate scaling to fit 9:16 aspect ratio
+            const scale = Math.min(
+              1080 / capturedCanvas.width,
+              1920 / capturedCanvas.height
+            );
+            const scaledWidth = capturedCanvas.width * scale;
+            const scaledHeight = capturedCanvas.height * scale;
+            const x = (1080 - scaledWidth) / 2;
+            const y = (1920 - scaledHeight) / 2;
+            
+            recordCtx.drawImage(capturedCanvas, x, y, scaledWidth, scaledHeight);
+          } catch {
+            // If capture fails, draw black frame
+            recordCtx.fillStyle = "#000";
+            recordCtx.fillRect(0, 0, 1080, 1920);
+          }
         }
         
         setExportProgress((i + 1) / totalFrames);
+        
+        // Update status every 10%
+        if ((i + 1) % Math.ceil(totalFrames / 10) === 0) {
+          setExportStatus(`Capturing frame ${i + 1}/${totalFrames}...`);
+        }
       }
       
+      setExportStatus("Finalizing video...");
+      
+      // Stop recording
       mediaRecorder.stop();
       const webmBlob = await recordingPromise;
       
@@ -170,20 +190,30 @@ export function RemotionPlayer({
       const url = URL.createObjectURL(webmBlob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${filename.replace(/\.[^/.]+$/, "")}_video.webm`;
+      a.download = `${filename.replace(/\.[^/.]+$/, "") || "code_video"}.webm`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      
+      setExportStatus("Done!");
       
       // Reset player
       playerRef.current?.seekTo(0);
+      playerRef.current?.pause();
+      setIsPlaying(false);
       
     } catch (error) {
       console.error("Export failed:", error);
+      setExportStatus(`Export failed: ${error instanceof Error ? error.message : "Unknown error"}`);
     } finally {
-      setIsExporting(false);
-      setExportProgress(0);
+      setTimeout(() => {
+        setIsExporting(false);
+        setExportProgress(0);
+        setExportStatus("");
+      }, 2000);
     }
-  }, [isExporting, fps, durationInFrames, filename, musicEnabled]);
+  }, [isExporting, fps, durationInFrames, filename]);
   
   // Listen to player events
   useEffect(() => {
@@ -223,9 +253,9 @@ export function RemotionPlayer({
     <div className="flex flex-col gap-4">
       {/* Player container with 9:16 aspect ratio */}
       <div 
+        ref={playerContainerRef}
         className="relative bg-black rounded-lg overflow-hidden"
         style={{ aspectRatio: "9/16", maxHeight: "60vh" }}
-        data-remotion-player
       >
         <Player
           ref={playerRef}
@@ -253,6 +283,7 @@ export function RemotionPlayer({
           size="icon"
           onClick={handleSeekToStart}
           title="Reset"
+          disabled={isExporting}
         >
           <RotateCcw className="h-4 w-4" />
         </Button>
@@ -262,6 +293,7 @@ export function RemotionPlayer({
           onClick={isPlaying ? handlePause : handlePlay}
           title={isPlaying ? "Pause" : "Play"}
           className="px-8"
+          disabled={isExporting}
         >
           {isPlaying ? (
             <>
@@ -278,12 +310,17 @@ export function RemotionPlayer({
         
         <Button
           variant="outline"
-          size="icon"
           onClick={handleExport}
           disabled={isExporting}
-          title="Download Video"
+          title="Download Video (WebM)"
+          className="gap-2"
         >
-          <Download className="h-4 w-4" />
+          {isExporting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+          {isExporting ? "Exporting..." : "Download"}
         </Button>
       </div>
       
@@ -297,7 +334,7 @@ export function RemotionPlayer({
             />
           </div>
           <p className="text-center text-sm text-muted-foreground">
-            Exporting... {Math.round(exportProgress * 100)}%
+            {exportStatus} ({Math.round(exportProgress * 100)}%)
           </p>
         </div>
       )}

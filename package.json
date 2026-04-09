@@ -45,6 +45,7 @@
     "date-fns": "4.1.0",
     "embla-carousel-react": "8.6.0",
     "highlight.js": "^11.11.1",
+    "html2canvas": "^1.4.1",
     "@remotion/player": "^4.0.275",
     "remotion": "^4.0.275",
     "input-otp": "1.4.2",
