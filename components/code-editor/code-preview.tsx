@@ -247,10 +247,10 @@ export const CodePreview = forwardRef<CodePreviewHandle, CodePreviewProps>(
         if (charIndex >= typingIndex) break;
       }
 
-      // Draw cursor
-      if (showCursor && typingIndex < code.length) {
+      // Draw cursor (always show during typing, blink when paused)
+      if (showCursor) {
         ctx.fillStyle = theme.foreground;
-        ctx.fillRect(cursorX, cursorY, 3, fontSize);
+        ctx.fillRect(cursorX, cursorY, 3, fontSize * 1.2);
       }
 
       // Reset transform

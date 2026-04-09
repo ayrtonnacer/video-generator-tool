@@ -67,10 +67,8 @@ export function VideoExporter({
       }
     });
 
-    ffmpeg.on("log", ({ message }) => {
-      if (message) {
-        console.log("[v0] FFmpeg:", message);
-      }
+    ffmpeg.on("log", () => {
+      // FFmpeg log messages
     });
 
     // Load FFmpeg with CORS-compatible URLs
@@ -82,7 +80,6 @@ export function VideoExporter({
     
     ffmpegRef.current = ffmpeg;
     setFfmpegLoaded(true);
-    console.log("[v0] FFmpeg loaded successfully");
     return ffmpeg;
   }, [ffmpegLoaded]);
 
@@ -95,8 +92,6 @@ export function VideoExporter({
     const frames: Blob[] = [];
     const frameInterval = 1000 / fps;
     const totalFrames = Math.ceil(totalDuration / frameInterval);
-
-    console.log("[v0] Starting frame capture:", { totalDuration, fps, totalFrames });
 
     for (let i = 0; i <= totalFrames; i++) {
       const time = i * frameInterval;
@@ -135,7 +130,6 @@ export function VideoExporter({
     // Reset animation state
     onAnimationStateChange?.(initialAnimationState);
     
-    console.log("[v0] Captured frames:", frames.length);
     return frames;
   }, [animationConfig, code, onAnimationStateChange]);
 
@@ -273,7 +267,6 @@ export function VideoExporter({
       setProgress(1);
       setStatus("Done!");
     } catch (err) {
-      console.error("[v0] Export failed:", err);
       setError(err instanceof Error ? err.message : "Export failed");
     } finally {
       setIsExporting(false);

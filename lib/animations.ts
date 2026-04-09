@@ -23,8 +23,8 @@ export interface AnimationConfig {
 export const defaultAnimationConfig: AnimationConfig = {
   typing: {
     enabled: true,
-    speed: 40, // 40 chars per second
-    startDelay: 500,
+    speed: 25, // 25 chars per second (better for readability)
+    startDelay: 300,
   },
   zoom: {
     enabled: false,
@@ -87,8 +87,9 @@ export function calculateAnimationState(
       );
     }
     
-    // Cursor blinks every 530ms
-    state.showCursor = Math.floor(time / 530) % 2 === 0;
+    // Cursor blinks every 530ms, but always visible while actively typing
+    const isActivelyTyping = state.typingIndex !== undefined && state.typingIndex < code.length;
+    state.showCursor = isActivelyTyping ? Math.floor(time / 530) % 2 === 0 || true : Math.floor(time / 530) % 2 === 0;
   } else {
     state.typingIndex = code.length;
     state.showCursor = false;

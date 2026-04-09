@@ -30,7 +30,12 @@ export default function Home() {
 
   // Animation state
   const [animationConfig, setAnimationConfig] = useState<AnimationConfig>(defaultAnimationConfig);
-  const [currentAnimationState, setCurrentAnimationState] = useState<Partial<AnimationState>>({});
+  const [currentAnimationState, setCurrentAnimationState] = useState<Partial<AnimationState>>({
+    typingIndex: 0,
+    showCursor: true,
+    zoomLevel: 1,
+    highlightedLines: new Set(),
+  });
 
   // Refs
   const previewRef = useRef<CodePreviewHandle | null>(null);
