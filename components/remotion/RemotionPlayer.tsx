@@ -114,6 +114,7 @@ export function RemotionPlayer({
           controls={false}
           loop={false}
           autoPlay={false}
+          acknowledgeRemotionLicense
         />
       </div>
       
