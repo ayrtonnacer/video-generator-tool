@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -15,15 +15,29 @@ import {
 } from "@/components/ui/select";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Film, Code2 } from "lucide-react";
 import {
-  TypingPreview,
-  codeThemes,
-  backgroundGradients,
-  type CodeTheme,
-  type BackgroundGradient,
-} from "@/components/code-video/typing-preview";
-import { SimpleExporter } from "@/components/code-video/simple-exporter";
-import { Film, Code2, Play, Pause, RotateCcw } from "lucide-react";
+  themeOptions,
+  backgroundOptions,
+  type CodeThemeName,
+  type BackgroundName,
+} from "@/components/remotion/CodeVideo";
+
+// Dynamic import for Remotion Player (client-side only)
+const RemotionPlayer = dynamic(
+  () => import("@/components/remotion/RemotionPlayer").then((mod) => mod.RemotionPlayer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-full min-h-[400px] bg-muted rounded-lg">
+        <div className="text-center space-y-2">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm text-muted-foreground">Loading player...</p>
+        </div>
+      </div>
+    ),
+  }
+);
 
 // Supported languages
 const languages = [
@@ -63,25 +77,18 @@ export default function Home() {
   const [filename, setFilename] = useState("app.js");
   
   // Style state
-  const [theme, setTheme] = useState<CodeTheme>("dracula");
-  const [background, setBackground] = useState<BackgroundGradient>("purple");
-  const [fontSize, setFontSize] = useState(24);
+  const [theme, setTheme] = useState<CodeThemeName>("dracula");
+  const [background, setBackground] = useState<BackgroundName>("candy");
+  const [fontSize, setFontSize] = useState(22);
   const [padding, setPadding] = useState(40);
   const [showWindowChrome, setShowWindowChrome] = useState(true);
   
   // Animation state
   const [typingSpeed, setTypingSpeed] = useState(25);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   
-  
-  
-  const handlePlay = useCallback(() => setIsPlaying(true), []);
-  const handlePause = useCallback(() => setIsPlaying(false), []);
-  const handleReset = useCallback(() => {
-    setIsPlaying(false);
-    setProgress(0);
+  const handleDurationChange = useCallback((newDuration: number) => {
+    setDuration(newDuration);
   }, []);
   
   return (
@@ -127,7 +134,6 @@ export default function Home() {
                 <TabsList className="w-full mb-4">
                   <TabsTrigger value="style" className="flex-1">Style</TabsTrigger>
                   <TabsTrigger value="animation" className="flex-1">Animation</TabsTrigger>
-                  <TabsTrigger value="export" className="flex-1">Export</TabsTrigger>
                 </TabsList>
                 
                 {/* Style tab */}
@@ -162,14 +168,14 @@ export default function Home() {
                   <div className="grid sm:grid-cols-2 gap-4">
                     <Field>
                       <FieldLabel>Theme</FieldLabel>
-                      <Select value={theme} onValueChange={(v) => setTheme(v as CodeTheme)}>
+                      <Select value={theme} onValueChange={(v) => setTheme(v as CodeThemeName)}>
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {Object.keys(codeThemes).map((t) => (
+                          {themeOptions.map((t) => (
                             <SelectItem key={t} value={t}>
-                              {t.charAt(0).toUpperCase() + t.slice(1).replace(/([A-Z])/g, " $1")}
+                              {t.charAt(0).toUpperCase() + t.slice(1)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -178,12 +184,12 @@ export default function Home() {
                     
                     <Field>
                       <FieldLabel>Background</FieldLabel>
-                      <Select value={background} onValueChange={(v) => setBackground(v as BackgroundGradient)}>
+                      <Select value={background} onValueChange={(v) => setBackground(v as BackgroundName)}>
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {Object.keys(backgroundGradients).map((bg) => (
+                          {backgroundOptions.map((bg) => (
                             <SelectItem key={bg} value={bg}>
                               {bg.charAt(0).toUpperCase() + bg.slice(1)}
                             </SelectItem>
@@ -202,7 +208,7 @@ export default function Home() {
                       value={[fontSize]}
                       onValueChange={([v]) => setFontSize(v)}
                       min={14}
-                      max={36}
+                      max={32}
                       step={1}
                     />
                   </Field>
@@ -250,34 +256,25 @@ export default function Home() {
                     <p className="text-sm font-medium">Estimated Duration</p>
                     <p className="text-2xl font-bold">{duration.toFixed(1)}s</p>
                     <p className="text-xs text-muted-foreground">
-                      Based on {code.length} characters at {typingSpeed} chars/sec
+                      Based on {code.length} characters at {typingSpeed} chars/sec + 2s hold
                     </p>
                   </div>
                   
                   <div className="p-4 border border-border rounded-lg space-y-2">
                     <p className="text-sm font-medium">Animation Sequence</p>
                     <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
-                      <li>0.5s delay before typing starts</li>
                       <li>Code types character by character</li>
-                      <li>Cursor blinks when typing completes</li>
-                      <li>1s pause at the end</li>
+                      <li>Cursor blinks while typing</li>
+                      <li>2 second hold at the end</li>
                     </ol>
                   </div>
-                </TabsContent>
-                
-                {/* Export tab */}
-                <TabsContent value="export" className="space-y-4">
-                  <SimpleExporter
-                    code={code}
-                    language={language}
-                    theme={theme}
-                    background={background}
-                    fontSize={fontSize}
-                    padding={padding}
-                    showWindowChrome={showWindowChrome}
-                    typingSpeed={typingSpeed}
-                    filename={filename}
-                  />
+                  
+                  <div className="p-4 bg-primary/10 border border-primary/20 rounded-lg">
+                    <p className="text-sm">
+                      <strong>Tip:</strong> Use the Play button below the preview to see your animation. 
+                      Videos are exported at 1080x1920 (9:16) resolution at 30fps.
+                    </p>
+                  </div>
                 </TabsContent>
               </Tabs>
             </div>
@@ -288,66 +285,22 @@ export default function Home() {
             <div className="bg-card border border-border rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between pb-3 border-b border-border">
                 <h2 className="font-semibold">Preview</h2>
-                <span className="text-xs text-muted-foreground px-2 py-1 bg-muted rounded">9:16</span>
+                <span className="text-xs text-muted-foreground px-2 py-1 bg-muted rounded">1080x1920</span>
               </div>
               
-              {/* Video preview */}
-              <div className="relative overflow-hidden rounded-lg" style={{ maxHeight: "60vh" }}>
-                <TypingPreview
-                  code={code}
-                  language={language}
-                  theme={theme}
-                  background={background}
-                  fontSize={fontSize}
-                  padding={padding}
-                  showWindowChrome={showWindowChrome}
-                  typingSpeed={typingSpeed}
-                  filename={filename}
-                  isPlaying={isPlaying}
-                  onPlayingChange={setIsPlaying}
-                  onProgress={setProgress}
-                  onDurationChange={setDuration}
-                />
-              </div>
-              
-              {/* Playback controls */}
-              <div className="space-y-3">
-                {/* Progress bar */}
-                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-primary transition-all duration-100"
-                    style={{ width: `${progress * 100}%` }}
-                  />
-                </div>
-                
-                {/* Control buttons */}
-                <div className="flex items-center justify-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={handleReset}
-                    className="h-10 w-10"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                  </Button>
-                  
-                  <Button
-                    onClick={isPlaying ? handlePause : handlePlay}
-                    className="h-12 w-12 rounded-full"
-                    size="icon"
-                  >
-                    {isPlaying ? (
-                      <Pause className="h-5 w-5" />
-                    ) : (
-                      <Play className="h-5 w-5 ml-0.5" />
-                    )}
-                  </Button>
-                </div>
-                
-                <p className="text-center text-sm text-muted-foreground">
-                  {duration.toFixed(1)}s
-                </p>
-              </div>
+              {/* Remotion Player */}
+              <RemotionPlayer
+                code={code}
+                language={language}
+                theme={theme}
+                background={background}
+                fontSize={fontSize}
+                padding={padding}
+                showWindowChrome={showWindowChrome}
+                filename={filename}
+                typingSpeed={typingSpeed}
+                onDurationChange={handleDurationChange}
+              />
             </div>
           </div>
         </div>
