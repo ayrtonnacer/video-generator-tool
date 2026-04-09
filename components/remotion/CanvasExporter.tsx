@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useState, useRef } from "react";
+import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Download, Loader2 } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import python from "highlight.js/lib/languages/python";
@@ -64,7 +63,8 @@ interface CanvasExporterProps {
   filename: string;
   typingSpeed: number;
   holdTime: number;
-  fps?: number;
+  musicEnabled?: boolean;
+  musicFadeOut?: number;
 }
 
 // Simple Python tokenizer for canvas rendering
@@ -95,7 +95,7 @@ function tokenizePython(code: string): Array<{ text: string; type: string }> {
       continue;
     }
     
-    // Strings (single, double, triple quotes)
+    // Strings
     if (code[i] === '"' || code[i] === "'") {
       const quote = code[i];
       const triple = code.slice(i, i + 3) === quote.repeat(3);
@@ -123,7 +123,7 @@ function tokenizePython(code: string): Array<{ text: string; type: string }> {
       continue;
     }
     
-    // Identifiers (keywords, builtins, functions)
+    // Identifiers
     if (/[a-zA-Z_]/.test(code[i])) {
       let end = i;
       while (end < code.length && /[a-zA-Z0-9_]/.test(code[end])) end++;
@@ -148,21 +148,23 @@ function tokenizePython(code: string): Array<{ text: string; type: string }> {
       continue;
     }
     
-    // Whitespace and newlines
-    if (/\s/.test(code[i])) {
-      let end = i;
-      while (end < code.length && /\s/.test(code[end]) && code[end] !== "\n") end++;
-      if (code[i] === "\n") {
-        tokens.push({ text: "\n", type: "newline" });
-        i++;
-      } else {
-        tokens.push({ text: code.slice(i, end), type: "whitespace" });
-        i = end;
-      }
+    // Newlines
+    if (code[i] === "\n") {
+      tokens.push({ text: "\n", type: "newline" });
+      i++;
       continue;
     }
     
-    // Other characters
+    // Whitespace
+    if (/\s/.test(code[i])) {
+      let end = i;
+      while (end < code.length && /\s/.test(code[end]) && code[end] !== "\n") end++;
+      tokens.push({ text: code.slice(i, end), type: "whitespace" });
+      i = end;
+      continue;
+    }
+    
+    // Other
     tokens.push({ text: code[i], type: "default" });
     i++;
   }
@@ -182,13 +184,12 @@ export function CanvasExporter({
   filename,
   typingSpeed,
   holdTime,
-  fps = 30,
+  musicEnabled = false,
+  musicFadeOut = 2,
 }: CanvasExporterProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState("");
-  const [exportFormat, setExportFormat] = useState<"webm" | "mp4">("mp4");
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   
   const themeColors = canvasThemes[theme] || canvasThemes["terminal-dark"];
   const bgColors = canvasBackgrounds[background] || canvasBackgrounds["scale-dark"];
@@ -203,14 +204,14 @@ export function CanvasExporter({
     const actualBg = background === "custom" && customBackgroundColor ? customBackgroundColor : bgColors.bg;
     const gradientTop = background === "custom" && customBackgroundColor ? customBackgroundColor : bgColors.gradientTop;
     
-    // Clear and draw background gradient
+    // Background gradient
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
     gradient.addColorStop(0, gradientTop);
     gradient.addColorStop(1, actualBg);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
     
-    // Draw dot pattern
+    // Dot pattern
     ctx.fillStyle = "rgba(255, 255, 255, 0.04)";
     for (let y = 0; y < height; y += 24) {
       for (let x = 0; x < width; x += 24) {
@@ -220,26 +221,24 @@ export function CanvasExporter({
       }
     }
     
-    // Code window dimensions
+    // Window
     const windowWidth = width - 80;
     const windowX = 40;
     const windowY = 200;
     const chromeHeight = showWindowChrome ? 44 : 0;
     
-    // Draw window background
     ctx.fillStyle = themeColors.background;
     ctx.beginPath();
     ctx.roundRect(windowX, windowY, windowWidth, height - windowY - 80, 16);
     ctx.fill();
     
-    // Draw window chrome
+    // Window chrome
     if (showWindowChrome) {
       ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
       ctx.beginPath();
       ctx.roundRect(windowX, windowY, windowWidth, chromeHeight, [16, 16, 0, 0]);
       ctx.fill();
       
-      // Traffic lights
       const dotY = windowY + chromeHeight / 2;
       const colors = ["#ff5f56", "#ffbd2e", "#27c93f"];
       colors.forEach((color, i) => {
@@ -249,7 +248,6 @@ export function CanvasExporter({
         ctx.fill();
       });
       
-      // Filename
       ctx.fillStyle = themeColors.foreground;
       ctx.globalAlpha = 0.6;
       ctx.font = "14px monospace";
@@ -259,12 +257,12 @@ export function CanvasExporter({
       ctx.textAlign = "left";
     }
     
-    // Render code with syntax highlighting
+    // Code
     const codeX = windowX + padding;
     let codeY = windowY + chromeHeight + padding + fontSize;
     const lineHeight = fontSize * 1.6;
     
-    ctx.font = `${fontSize}px "JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace`;
+    ctx.font = `${fontSize}px "JetBrains Mono", "Fira Code", Consolas, monospace`;
     
     const visibleCode = code.slice(0, visibleChars);
     const tokens = language === "plaintext" 
@@ -280,7 +278,6 @@ export function CanvasExporter({
         continue;
       }
       
-      // Set color based on token type
       switch (token.type) {
         case "keyword": ctx.fillStyle = themeColors.keyword; break;
         case "string": ctx.fillStyle = themeColors.string; break;
@@ -295,23 +292,40 @@ export function CanvasExporter({
       currentX += ctx.measureText(token.text).width;
     }
     
-    // Draw cursor
+    // Cursor
     if (visibleChars < code.length) {
       ctx.fillStyle = themeColors.foreground;
       ctx.fillRect(currentX + 2, codeY - fontSize + 4, 3, fontSize * 1.2);
     }
-  }, [code, language, theme, background, customBackgroundColor, fontSize, padding, showWindowChrome, filename, themeColors, bgColors]);
+  }, [code, language, background, customBackgroundColor, fontSize, padding, showWindowChrome, filename, themeColors, bgColors]);
   
   const handleExport = useCallback(async () => {
     if (isExporting) return;
     
     setIsExporting(true);
     setExportProgress(0);
-    setExportStatus("Preparing...");
+    setExportStatus("Initializing FFmpeg...");
     
     try {
+      // Load FFmpeg first
+      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+      const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
+      
+      const ffmpeg = new FFmpeg();
+      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+      
+      setExportStatus("Loading FFmpeg (first time takes ~30s)...");
+      
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+      });
+      
+      setExportStatus("Preparing video...");
+      
       const width = 1080;
       const height = 1920;
+      const fps = 30;
       
       // Create canvas
       const canvas = document.createElement("canvas");
@@ -324,27 +338,13 @@ export function CanvasExporter({
       const typingFrames = Math.ceil((code.length / typingSpeed) * fps);
       const holdFrames = Math.ceil(holdTime * fps);
       const totalFrames = typingFrames + holdFrames;
+      const totalDurationSecs = totalFrames / fps;
       
-      // Setup recorder
-      const stream = canvas.captureStream(fps);
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "video/webm;codecs=vp9",
-        videoBitsPerSecond: 8000000,
-      });
-      
-      const chunks: Blob[] = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-      
-      const recordingPromise = new Promise<Blob>((resolve) => {
-        mediaRecorder.onstop = () => resolve(new Blob(chunks, { type: "video/webm" }));
-      });
-      
-      mediaRecorder.start(100);
       setExportStatus("Rendering frames...");
       
-      // Render each frame
+      // Render all frames as PNG images
+      const frameData: Uint8Array[] = [];
+      
       for (let frame = 0; frame < totalFrames; frame++) {
         const visibleChars = Math.min(
           code.length,
@@ -353,67 +353,96 @@ export function CanvasExporter({
         
         renderFrame(ctx, visibleChars >= code.length ? code.length : visibleChars, width, height);
         
-        // Wait for frame timing (33ms for 30fps)
-        await new Promise(r => setTimeout(r, 1000 / fps));
+        // Convert canvas to PNG
+        const blob = await new Promise<Blob>((resolve) => {
+          canvas.toBlob((b) => resolve(b!), "image/png");
+        });
+        const arrayBuffer = await blob.arrayBuffer();
+        frameData.push(new Uint8Array(arrayBuffer));
         
-        setExportProgress((frame + 1) / totalFrames);
+        setExportProgress((frame + 1) / totalFrames * 0.5); // 50% for frames
+        
         if ((frame + 1) % 30 === 0) {
-          setExportStatus(`Rendering... ${Math.round(((frame + 1) / totalFrames) * 100)}%`);
+          setExportStatus(`Rendering frame ${frame + 1}/${totalFrames}...`);
         }
       }
       
-      mediaRecorder.stop();
-      setExportStatus("Processing...");
-      const webmBlob = await recordingPromise;
+      setExportStatus("Writing frames to FFmpeg...");
       
-      // Convert to MP4 if needed
-      let finalBlob = webmBlob;
-      let ext = "webm";
-      
-      if (exportFormat === "mp4") {
-        setExportStatus("Converting to MP4...");
-        try {
-          const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-          const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
-          
-          const ffmpeg = new FFmpeg();
-          const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
-          
-          await ffmpeg.load({
-            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-          });
-          
-          await ffmpeg.writeFile("input.webm", await fetchFile(webmBlob));
-          await ffmpeg.exec([
-            "-i", "input.webm",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-            "output.mp4"
-          ]);
-          
-          const data = await ffmpeg.readFile("output.mp4");
-          finalBlob = new Blob([data], { type: "video/mp4" });
-          ext = "mp4";
-        } catch {
-          setExportStatus("MP4 failed, using WebM...");
-          await new Promise(r => setTimeout(r, 1000));
-        }
+      // Write frames to FFmpeg
+      for (let i = 0; i < frameData.length; i++) {
+        const frameNum = i.toString().padStart(5, "0");
+        await ffmpeg.writeFile(`frame${frameNum}.png`, frameData[i]);
       }
+      
+      setExportProgress(0.6);
+      
+      // Build FFmpeg command
+      const ffmpegArgs = [
+        "-framerate", fps.toString(),
+        "-i", "frame%05d.png",
+      ];
+      
+      // Add audio if enabled
+      if (musicEnabled) {
+        setExportStatus("Loading audio...");
+        const audioResponse = await fetch("/audio/background-music.mp3");
+        const audioData = await audioResponse.arrayBuffer();
+        await ffmpeg.writeFile("music.mp3", new Uint8Array(audioData));
+        
+        // Add audio with fade out
+        const fadeStart = Math.max(0, totalDurationSecs - musicFadeOut);
+        ffmpegArgs.push(
+          "-i", "music.mp3",
+          "-t", totalDurationSecs.toString(),
+          "-af", `afade=t=out:st=${fadeStart}:d=${musicFadeOut}`,
+          "-shortest"
+        );
+      }
+      
+      // Output settings
+      ffmpegArgs.push(
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart"
+      );
+      
+      if (musicEnabled) {
+        ffmpegArgs.push("-c:a", "aac", "-b:a", "192k");
+      }
+      
+      ffmpegArgs.push("output.mp4");
+      
+      setExportStatus("Encoding MP4...");
+      setExportProgress(0.7);
+      
+      await ffmpeg.exec(ffmpegArgs);
+      
+      setExportProgress(0.95);
+      setExportStatus("Preparing download...");
+      
+      // Read output
+      const data = await ffmpeg.readFile("output.mp4");
+      const mp4Blob = new Blob([data], { type: "video/mp4" });
       
       // Download
-      const url = URL.createObjectURL(finalBlob);
+      const url = URL.createObjectURL(mp4Blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${filename.replace(/\.[^/.]+$/, "") || "code_video"}.${ext}`;
+      a.download = `${filename.replace(/\.[^/.]+$/, "") || "code_video"}.mp4`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       
+      setExportProgress(1);
       setExportStatus("Done!");
+      
     } catch (error) {
-      setExportStatus(`Error: ${error instanceof Error ? error.message : "Unknown"}`);
+      console.error("Export error:", error);
+      setExportStatus(`Error: ${error instanceof Error ? error.message : "Export failed"}`);
     } finally {
       setTimeout(() => {
         setIsExporting(false);
@@ -421,37 +450,25 @@ export function CanvasExporter({
         setExportStatus("");
       }, 2000);
     }
-  }, [isExporting, code, typingSpeed, holdTime, fps, exportFormat, filename, renderFrame]);
+  }, [isExporting, code, typingSpeed, holdTime, filename, renderFrame, musicEnabled, musicFadeOut]);
   
   const totalDuration = ((code.length / typingSpeed) + holdTime).toFixed(1);
   
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <Select value={exportFormat} onValueChange={(v) => setExportFormat(v as "webm" | "mp4")} disabled={isExporting}>
-          <SelectTrigger className="w-24">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="mp4">MP4</SelectItem>
-            <SelectItem value="webm">WebM</SelectItem>
-          </SelectContent>
-        </Select>
-        
-        <Button onClick={handleExport} disabled={isExporting} className="flex-1 gap-2">
-          {isExporting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Exporting...
-            </>
-          ) : (
-            <>
-              <Download className="h-4 w-4" />
-              Download Video ({totalDuration}s)
-            </>
-          )}
-        </Button>
-      </div>
+      <Button onClick={handleExport} disabled={isExporting} className="w-full gap-2" size="lg">
+        {isExporting ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Exporting...
+          </>
+        ) : (
+          <>
+            <Download className="h-4 w-4" />
+            Download MP4 ({totalDuration}s){musicEnabled ? " + Music" : ""}
+          </>
+        )}
+      </Button>
       
       {isExporting && (
         <div className="space-y-2">
@@ -462,7 +479,7 @@ export function CanvasExporter({
             />
           </div>
           <p className="text-center text-xs text-muted-foreground">
-            {exportStatus} ({Math.round(exportProgress * 100)}%)
+            {exportStatus}
           </p>
         </div>
       )}
