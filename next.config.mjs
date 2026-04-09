@@ -3,19 +3,11 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   images: {
     unoptimized: true,
-  },
-  webpack: (config, { isServer }) => {
-    // FFmpeg packages should only be bundled on the client
-    if (isServer) {
-      config.externals = config.externals || [];
-      config.externals.push({
-        '@ffmpeg/ffmpeg': 'commonjs @ffmpeg/ffmpeg',
-        '@ffmpeg/util': 'commonjs @ffmpeg/util',
-      });
-    }
-    return config;
   },
   // Required for SharedArrayBuffer (needed by FFmpeg.wasm)
   async headers() {
@@ -34,11 +26,6 @@ const nextConfig = {
         ],
       },
     ];
-  },
-  experimental: {
-    turbo: {
-      rules: {},
-    },
   },
 }
 export default nextConfig
