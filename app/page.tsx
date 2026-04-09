@@ -41,6 +41,15 @@ const RemotionPlayer = dynamic(
   }
 );
 
+// Fast canvas-based exporter (no audio, but much faster)
+const CanvasExporter = dynamic(
+  () => import("@/components/remotion/CanvasExporter").then((mod) => mod.CanvasExporter),
+  { 
+    ssr: false,
+    loading: () => <div className="h-14 bg-muted rounded animate-pulse" />,
+  }
+);
+
 // Only Python and plaintext
 const languages = [
   { value: "python", label: "Python" },
@@ -408,8 +417,32 @@ export default function Home() {
                 holdTime={holdTime}
                 musicEnabled={musicEnabled}
                 musicFadeOut={musicFadeOut}
-                onDurationChange={handleDurationChange}
+onDurationChange={handleDurationChange}
               />
+              
+              {/* Fast Export Section */}
+              <div className="pt-4 border-t border-border space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold">Quick Export</h3>
+                  <span className="text-xs text-muted-foreground bg-green-500/10 text-green-600 px-2 py-0.5 rounded">Fast</span>
+                </div>
+                <CanvasExporter
+                  code={code}
+                  language={language}
+                  theme={theme}
+                  background={background}
+                  customBackgroundColor={customBackgroundColor}
+                  fontSize={fontSize}
+                  padding={padding}
+                  showWindowChrome={showWindowChrome}
+                  filename={filename}
+                  typingSpeed={typingSpeed}
+                  holdTime={holdTime}
+                />
+                <p className="text-xs text-muted-foreground text-center">
+                  Direct canvas rendering - faster export without audio
+                </p>
+              </div>
             </div>
           </div>
         </div>
