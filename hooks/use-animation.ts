@@ -34,7 +34,6 @@ export function useAnimation({ code, config = defaultAnimationConfig, onFrame }:
         isPlaying: true,
         currentTime: time,
       };
-      console.log("[v0] Animation frame:", { time, typingIndex: newState.typingIndex, zoomLevel: newState.zoomLevel });
       setState(newState);
       onFrame?.(newState);
     },
