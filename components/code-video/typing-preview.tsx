@@ -85,7 +85,6 @@ interface TypingPreviewProps {
   onPlayingChange: (playing: boolean) => void;
   onProgress: (progress: number) => void;
   onDurationChange: (duration: number) => void;
-  containerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 export function TypingPreview({
@@ -102,15 +101,12 @@ export function TypingPreview({
   onPlayingChange,
   onProgress,
   onDurationChange,
-  containerRef,
 }: TypingPreviewProps) {
   const [visibleChars, setVisibleChars] = useState(0);
   const [showCursor, setShowCursor] = useState(true);
   const animationRef = useRef<number | null>(null);
   const startTimeRef = useRef<number | null>(null);
-  const internalRef = useRef<HTMLDivElement>(null);
-  
-  const ref = containerRef || internalRef;
+  const containerRef = useRef<HTMLDivElement>(null);
   
   const themeColors = codeThemes[theme];
   const backgroundGradient = backgroundGradients[background];
@@ -224,7 +220,7 @@ export function TypingPreview({
   
   return (
     <div
-      ref={ref}
+      ref={containerRef}
       className="w-full h-full flex items-center justify-center"
       style={{
         background: backgroundGradient,

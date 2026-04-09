@@ -75,8 +75,7 @@ export default function Home() {
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   
-  // Ref for video export
-  const previewRef = useRef<HTMLDivElement>(null);
+  
   
   const handlePlay = useCallback(() => setIsPlaying(true), []);
   const handlePause = useCallback(() => setIsPlaying(false), []);
@@ -269,11 +268,15 @@ export default function Home() {
                 {/* Export tab */}
                 <TabsContent value="export" className="space-y-4">
                   <SimpleExporter
-                    containerRef={previewRef}
                     code={code}
+                    language={language}
+                    theme={theme}
+                    background={background}
+                    fontSize={fontSize}
+                    padding={padding}
+                    showWindowChrome={showWindowChrome}
                     typingSpeed={typingSpeed}
                     filename={filename}
-                    onPlayAnimation={handlePlay}
                   />
                 </TabsContent>
               </Tabs>
@@ -291,7 +294,6 @@ export default function Home() {
               {/* Video preview */}
               <div className="relative overflow-hidden rounded-lg" style={{ maxHeight: "60vh" }}>
                 <TypingPreview
-                  containerRef={previewRef}
                   code={code}
                   language={language}
                   theme={theme}
