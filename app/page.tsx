@@ -172,6 +172,7 @@ export default function Home() {
                   code={code}
                   animationConfig={animationConfig}
                   filename={filename}
+                  onAnimationStateChange={setCurrentAnimationState}
                 />
               </div>
             </div>
