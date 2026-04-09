@@ -5,7 +5,7 @@ import { useRef, useCallback, useState, useEffect } from "react";
 import { CodeVideo } from "./CodeVideo";
 import type { CodeThemeName, BackgroundName } from "./CodeVideo";
 import { Button } from "@/components/ui/button";
-import { Download, Play, Pause, RotateCcw, Loader2 } from "lucide-react";
+import { Download, Play, Pause, RotateCcw, Loader2, Maximize2, Minimize2 } from "lucide-react";
 
 interface RemotionPlayerProps {
   code: string;
@@ -20,6 +20,7 @@ interface RemotionPlayerProps {
   typingSpeed: number;
   holdTime: number;
   musicEnabled: boolean;
+  musicFadeOut: number; // seconds for fade out
   onDurationChange?: (duration: number) => void;
 }
 
@@ -36,6 +37,7 @@ export function RemotionPlayer({
   typingSpeed,
   holdTime,
   musicEnabled,
+  musicFadeOut,
   onDurationChange,
 }: RemotionPlayerProps) {
   const playerRef = useRef<PlayerRef>(null);
@@ -44,6 +46,7 @@ export function RemotionPlayer({
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
   
   // Calculate duration based on code length and typing speed
   const fps = 30;
@@ -77,31 +80,58 @@ export function RemotionPlayer({
     setIsPlaying(false);
   }, []);
   
-  // Export using html2canvas + MediaRecorder
+  // Fullscreen toggle
+  const handleFullscreen = useCallback(() => {
+    if (!playerContainerRef.current) return;
+    
+    if (!document.fullscreenElement) {
+      playerContainerRef.current.requestFullscreen().then(() => {
+        setIsFullscreen(true);
+      }).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => {
+        setIsFullscreen(false);
+      }).catch(() => {});
+    }
+  }, []);
+  
+  // Listen to fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+  
+  // Export using real-time playback recording (much faster than frame-by-frame)
   const handleExport = useCallback(async () => {
     if (isExporting || !playerContainerRef.current) return;
     
     setIsExporting(true);
     setExportProgress(0);
-    setExportStatus("Preparing export...");
+    setExportStatus("Preparing recording...");
     
     try {
-      // Dynamic import html2canvas
-      const html2canvas = (await import("html2canvas")).default;
+      // Find the player element
+      const playerElement = playerContainerRef.current.querySelector('[style*="width"]') as HTMLElement 
+        || playerContainerRef.current;
       
-      // Create offscreen canvas for recording
+      if (!playerElement) throw new Error("Player element not found");
+      
+      // Create a canvas to capture the video
       const recordCanvas = document.createElement("canvas");
       recordCanvas.width = 1080;
       recordCanvas.height = 1920;
       const recordCtx = recordCanvas.getContext("2d");
       if (!recordCtx) throw new Error("Canvas context not available");
       
-      // Setup MediaRecorder
-      const stream = recordCanvas.captureStream(fps);
+      // Setup MediaRecorder on the canvas stream
+      const stream = recordCanvas.captureStream(30);
       
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: "video/webm;codecs=vp9",
-        videoBitsPerSecond: 10000000, // 10 Mbps for high quality
+        videoBitsPerSecond: 8000000, // 8 Mbps
       });
       
       const chunks: Blob[] = [];
@@ -115,78 +145,82 @@ export function RemotionPlayer({
         };
       });
       
-      mediaRecorder.start(100); // Collect data every 100ms
+      // Dynamic import html2canvas
+      const html2canvas = (await import("html2canvas")).default;
       
-      // Reset to start
+      // Reset to start and prepare
       playerRef.current?.seekTo(0);
-      await new Promise(r => setTimeout(r, 100));
+      playerRef.current?.pause();
+      await new Promise(r => setTimeout(r, 200));
       
-      setExportStatus("Capturing frames...");
+      setExportStatus("Recording video...");
+      mediaRecorder.start(100);
       
-      // Capture frames
-      const totalFrames = durationInFrames;
-      const frameDelay = 1000 / fps;
+      // Play the video and capture in real-time at a lower frame rate for speed
+      const exportFps = 15; // Lower FPS for faster export, still smooth
+      const frameDuration = 1000 / exportFps;
+      const totalExportFrames = Math.ceil(durationInFrames / (fps / exportFps));
       
-      for (let i = 0; i < totalFrames; i++) {
-        // Seek to frame
-        playerRef.current?.seekTo(i);
-        
-        // Wait for render
-        await new Promise(r => setTimeout(r, frameDelay));
-        
-        // Capture the player content
-        const playerElement = playerContainerRef.current?.querySelector('[data-remotion-player-content]') as HTMLElement 
-          || playerContainerRef.current?.firstChild as HTMLElement;
-        
-        if (playerElement) {
-          try {
-            const capturedCanvas = await html2canvas(playerElement, {
-              backgroundColor: null,
-              scale: 2, // Higher quality
-              logging: false,
-              useCORS: true,
-              allowTaint: true,
-              width: playerElement.offsetWidth,
-              height: playerElement.offsetHeight,
-            });
-            
-            // Draw to record canvas, scaling to 1080x1920
-            recordCtx.fillStyle = "#000";
-            recordCtx.fillRect(0, 0, 1080, 1920);
-            
-            // Calculate scaling to fit 9:16 aspect ratio
-            const scale = Math.min(
-              1080 / capturedCanvas.width,
-              1920 / capturedCanvas.height
-            );
-            const scaledWidth = capturedCanvas.width * scale;
-            const scaledHeight = capturedCanvas.height * scale;
-            const x = (1080 - scaledWidth) / 2;
-            const y = (1920 - scaledHeight) / 2;
-            
-            recordCtx.drawImage(capturedCanvas, x, y, scaledWidth, scaledHeight);
-          } catch {
-            // If capture fails, draw black frame
-            recordCtx.fillStyle = "#000";
-            recordCtx.fillRect(0, 0, 1080, 1920);
-          }
+      // Start playback
+      playerRef.current?.play();
+      
+      let currentFrame = 0;
+      const captureInterval = setInterval(async () => {
+        if (currentFrame >= totalExportFrames) {
+          clearInterval(captureInterval);
+          return;
         }
         
-        setExportProgress((i + 1) / totalFrames);
-        
-        // Update status every 10%
-        if ((i + 1) % Math.ceil(totalFrames / 10) === 0) {
-          setExportStatus(`Capturing frame ${i + 1}/${totalFrames}...`);
+        try {
+          // Capture current state
+          const capturedCanvas = await html2canvas(playerElement, {
+            backgroundColor: "#000",
+            scale: 1.5,
+            logging: false,
+            useCORS: true,
+            allowTaint: true,
+          });
+          
+          // Draw to record canvas
+          recordCtx.fillStyle = "#000";
+          recordCtx.fillRect(0, 0, 1080, 1920);
+          
+          const scale = Math.min(
+            1080 / capturedCanvas.width,
+            1920 / capturedCanvas.height
+          );
+          const scaledWidth = capturedCanvas.width * scale;
+          const scaledHeight = capturedCanvas.height * scale;
+          const x = (1080 - scaledWidth) / 2;
+          const y = (1920 - scaledHeight) / 2;
+          
+          recordCtx.drawImage(capturedCanvas, x, y, scaledWidth, scaledHeight);
+        } catch {
+          // Continue on error
         }
-      }
+        
+        currentFrame++;
+        setExportProgress(currentFrame / totalExportFrames);
+        
+        if (currentFrame % 10 === 0) {
+          setExportStatus(`Recording... ${Math.round((currentFrame / totalExportFrames) * 100)}%`);
+        }
+      }, frameDuration);
       
-      setExportStatus("Finalizing video...");
+      // Wait for playback to complete
+      const playbackDuration = (durationInFrames / fps) * 1000;
+      await new Promise(r => setTimeout(r, playbackDuration + 500));
+      
+      clearInterval(captureInterval);
       
       // Stop recording
+      playerRef.current?.pause();
+      setExportStatus("Finalizing...");
+      
       mediaRecorder.stop();
       const webmBlob = await recordingPromise;
       
-      // Download the video
+      // Download
       const url = URL.createObjectURL(webmBlob);
       const a = document.createElement("a");
       a.href = url;
@@ -198,13 +232,11 @@ export function RemotionPlayer({
       
       setExportStatus("Done!");
       
-      // Reset player
+      // Reset
       playerRef.current?.seekTo(0);
-      playerRef.current?.pause();
       setIsPlaying(false);
       
     } catch (error) {
-      console.error("Export failed:", error);
       setExportStatus(`Export failed: ${error instanceof Error ? error.message : "Unknown error"}`);
     } finally {
       setTimeout(() => {
@@ -247,6 +279,8 @@ export function RemotionPlayer({
     filename,
     typingSpeed,
     musicEnabled,
+    musicFadeOut,
+    durationInFrames, // Pass for fade calculation
   };
   
   return (
@@ -254,9 +288,19 @@ export function RemotionPlayer({
       {/* Player container with 9:16 aspect ratio */}
       <div 
         ref={playerContainerRef}
-        className="relative bg-black rounded-lg overflow-hidden"
-        style={{ aspectRatio: "9/16", maxHeight: "60vh" }}
+        className={`relative bg-black rounded-lg overflow-hidden ${isFullscreen ? "flex items-center justify-center" : ""}`}
+        style={{ aspectRatio: isFullscreen ? undefined : "9/16", maxHeight: isFullscreen ? "100vh" : "60vh" }}
       >
+        {/* Fullscreen button overlay */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleFullscreen}
+          className="absolute top-2 right-2 z-10 bg-black/50 hover:bg-black/70 text-white"
+          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        >
+          {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </Button>
         <Player
           ref={playerRef}
           component={CodeVideo}

@@ -112,6 +112,8 @@ interface CodeVideoProps {
   filename: string;
   typingSpeed: number;
   musicEnabled: boolean;
+  musicFadeOut: number; // seconds for fade out
+  durationInFrames: number;
 }
 
 export const CodeVideo: React.FC<CodeVideoProps> = ({
@@ -126,6 +128,8 @@ export const CodeVideo: React.FC<CodeVideoProps> = ({
   filename,
   typingSpeed,
   musicEnabled,
+  musicFadeOut,
+  durationInFrames: totalDuration,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -194,9 +198,23 @@ export const CodeVideo: React.FC<CodeVideoProps> = ({
         <AbsoluteFill style={patternStyle} />
       )}
       
-      {/* Background music */}
+      {/* Background music with fade out */}
       {musicEnabled && (
-        <Audio src={staticFile("audio/background-music.mp3")} volume={0.3} />
+        <Audio 
+          src={staticFile("audio/background-music.mp3")} 
+          volume={(f) => {
+            const fadeOutFrames = musicFadeOut * fps;
+            const fadeStartFrame = totalDuration - fadeOutFrames;
+            
+            if (fadeOutFrames <= 0 || f < fadeStartFrame) {
+              return 0.3; // Normal volume
+            }
+            
+            // Fade out
+            const fadeProgress = (f - fadeStartFrame) / fadeOutFrames;
+            return Math.max(0, 0.3 * (1 - fadeProgress));
+          }}
+        />
       )}
       
       {/* Content */}

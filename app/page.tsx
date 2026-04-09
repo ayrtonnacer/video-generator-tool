@@ -80,6 +80,7 @@ export default function Home() {
   const [typingSpeed, setTypingSpeed] = useState(25);
   const [holdTime, setHoldTime] = useState(2);
   const [musicEnabled, setMusicEnabled] = useState(true);
+  const [musicFadeOut, setMusicFadeOut] = useState(2); // seconds for fade out
   const [duration, setDuration] = useState(0);
   
   const handleDurationChange = useCallback((newDuration: number) => {
@@ -327,18 +328,39 @@ export default function Home() {
                     </p>
                   </Field>
                   
-                  <div className="flex items-center justify-between py-3 px-4 bg-muted rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <Music className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <label className="text-sm font-medium">Background Music</label>
-                        <p className="text-xs text-muted-foreground">Black Eyed Peas - Rock That Body</p>
+                  <div className="space-y-3 p-4 bg-muted rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Music className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <label className="text-sm font-medium">Background Music</label>
+                          <p className="text-xs text-muted-foreground">Black Eyed Peas - Rock That Body</p>
+                        </div>
                       </div>
+                      <Switch
+                        checked={musicEnabled}
+                        onCheckedChange={setMusicEnabled}
+                      />
                     </div>
-                    <Switch
-                      checked={musicEnabled}
-                      onCheckedChange={setMusicEnabled}
-                    />
+                    
+                    {musicEnabled && (
+                      <Field>
+                        <div className="flex items-center justify-between">
+                          <FieldLabel>Music Fade Out</FieldLabel>
+                          <span className="text-sm text-muted-foreground">{musicFadeOut}s</span>
+                        </div>
+                        <Slider
+                          value={[musicFadeOut]}
+                          onValueChange={([v]) => setMusicFadeOut(v)}
+                          min={0}
+                          max={5}
+                          step={0.5}
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Gradually lower volume at the end (0 = no fade)
+                        </p>
+                      </Field>
+                    )}
                   </div>
                   
                   <div className="p-4 bg-muted rounded-lg space-y-2">
@@ -385,6 +407,7 @@ export default function Home() {
                 typingSpeed={typingSpeed}
                 holdTime={holdTime}
                 musicEnabled={musicEnabled}
+                musicFadeOut={musicFadeOut}
                 onDurationChange={handleDurationChange}
               />
             </div>
