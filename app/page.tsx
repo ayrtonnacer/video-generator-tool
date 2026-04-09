@@ -85,6 +85,8 @@ export default function Home() {
   
   // Animation state
   const [typingSpeed, setTypingSpeed] = useState(25);
+  const [holdTime, setHoldTime] = useState(2); // seconds to hold at the end
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [duration, setDuration] = useState(0);
   
   const handleDurationChange = useCallback((newDuration: number) => {
@@ -252,11 +254,39 @@ export default function Home() {
                     />
                   </Field>
                   
+                  <Field>
+                    <div className="flex items-center justify-between">
+                      <FieldLabel>Hold Time at End</FieldLabel>
+                      <span className="text-sm text-muted-foreground">{holdTime}s</span>
+                    </div>
+                    <Slider
+                      value={[holdTime]}
+                      onValueChange={([v]) => setHoldTime(v)}
+                      min={0}
+                      max={10}
+                      step={0.5}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Time to display the complete code before the video ends
+                    </p>
+                  </Field>
+                  
+                  <div className="flex items-center justify-between py-2">
+                    <div>
+                      <label className="text-sm font-medium">Typing Sound</label>
+                      <p className="text-xs text-muted-foreground">Play sound effect while typing</p>
+                    </div>
+                    <Switch
+                      checked={soundEnabled}
+                      onCheckedChange={setSoundEnabled}
+                    />
+                  </div>
+                  
                   <div className="p-4 bg-muted rounded-lg space-y-2">
                     <p className="text-sm font-medium">Estimated Duration</p>
                     <p className="text-2xl font-bold">{duration.toFixed(1)}s</p>
                     <p className="text-xs text-muted-foreground">
-                      Based on {code.length} characters at {typingSpeed} chars/sec + 2s hold
+                      Based on {code.length} characters at {typingSpeed} chars/sec + {holdTime}s hold
                     </p>
                   </div>
                   
@@ -265,7 +295,7 @@ export default function Home() {
                     <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
                       <li>Code types character by character</li>
                       <li>Cursor blinks while typing</li>
-                      <li>2 second hold at the end</li>
+                      <li>{holdTime} second{holdTime !== 1 ? "s" : ""} hold at the end</li>
                     </ol>
                   </div>
                   
@@ -299,6 +329,8 @@ export default function Home() {
                 showWindowChrome={showWindowChrome}
                 filename={filename}
                 typingSpeed={typingSpeed}
+                holdTime={holdTime}
+                soundEnabled={soundEnabled}
                 onDurationChange={handleDurationChange}
               />
             </div>

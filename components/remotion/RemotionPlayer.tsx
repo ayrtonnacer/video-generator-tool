@@ -14,6 +14,8 @@ interface RemotionPlayerProps {
   showWindowChrome: boolean;
   filename: string;
   typingSpeed: number;
+  holdTime: number; // seconds to hold at the end
+  soundEnabled: boolean;
   onDurationChange?: (duration: number) => void;
 }
 
@@ -27,6 +29,8 @@ export function RemotionPlayer({
   showWindowChrome,
   filename,
   typingSpeed,
+  holdTime,
+  soundEnabled,
   onDurationChange,
 }: RemotionPlayerProps) {
   const playerRef = useRef<PlayerRef>(null);
@@ -34,9 +38,17 @@ export function RemotionPlayer({
   
   // Calculate duration based on code length and typing speed
   const fps = 30;
-  const typingDuration = Math.ceil((code.length / typingSpeed) * fps);
-  const holdDuration = fps * 2; // 2 seconds hold at the end
-  const durationInFrames = typingDuration + holdDuration;
+  const safeTypingSpeed = typingSpeed || 25;
+  const safeHoldTime = holdTime ?? 2;
+  const safeCodeLength = code?.length || 1;
+  
+  const typingDuration = Math.ceil((safeCodeLength / safeTypingSpeed) * fps);
+  const holdDuration = Math.ceil(fps * safeHoldTime);
+  const durationInFrames = Math.max(1, typingDuration + holdDuration) || 60; // Fallback to 60 frames (2s)
+  
+  // Audio reference for typing sound
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const lastCharCountRef = useRef(0);
   
   useEffect(() => {
     if (onDurationChange) {
@@ -91,6 +103,62 @@ export function RemotionPlayer({
     filename,
     typingSpeed,
   };
+  
+  // Play typing sound effect
+  const playTypingSound = useCallback(() => {
+    if (!soundEnabled) return;
+    
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+      
+      const ctx = audioContextRef.current;
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      // Short click sound
+      oscillator.frequency.setValueAtTime(800 + Math.random() * 400, ctx.currentTime);
+      oscillator.type = "square";
+      
+      gainNode.gain.setValueAtTime(0.03, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+      
+      oscillator.start(ctx.currentTime);
+      oscillator.stop(ctx.currentTime + 0.05);
+    } catch {
+      // Audio context not available
+    }
+  }, [soundEnabled]);
+  
+  // Handle frame updates for sound
+  const handleFrameUpdate = useCallback((e: { detail: { frame: number } }) => {
+    if (!soundEnabled) return;
+    
+    const frame = e.detail.frame;
+    const charsPerFrame = typingSpeed / fps;
+    const currentCharCount = Math.floor(frame * charsPerFrame);
+    
+    // Play sound for each new character
+    if (currentCharCount > lastCharCountRef.current && currentCharCount <= code.length) {
+      playTypingSound();
+    }
+    lastCharCountRef.current = currentCharCount;
+  }, [soundEnabled, typingSpeed, fps, code.length, playTypingSound]);
+  
+  // Subscribe to frame updates for sound
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player || !soundEnabled) return;
+    
+    player.addEventListener("frameupdate", handleFrameUpdate as EventListener);
+    return () => {
+      player.removeEventListener("frameupdate", handleFrameUpdate as EventListener);
+    };
+  }, [handleFrameUpdate, soundEnabled]);
   
   return (
     <div className="flex flex-col gap-4">
