@@ -1,8 +1,10 @@
 "use client";
 
+// Remotion Player wrapper for Next.js
 import { Player, PlayerRef } from "@remotion/player";
 import { useRef, useCallback, useState, useEffect } from "react";
-import { CodeVideo, CodeThemeName, BackgroundName } from "./CodeVideo";
+import { CodeVideo } from "./CodeVideo";
+import type { CodeThemeName, BackgroundName } from "./CodeVideo";
 
 interface RemotionPlayerProps {
   code: string;
