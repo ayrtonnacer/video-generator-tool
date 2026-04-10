@@ -2,14 +2,12 @@
 
 import { useCallback, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Download, Loader2 } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import python from "highlight.js/lib/languages/python";
 
 hljs.registerLanguage("python", python);
 
-// Theme colors for canvas rendering
 const canvasThemes = {
   "terminal-dark": {
     background: "#0d1117",
@@ -64,38 +62,25 @@ interface CanvasExporterProps {
   filename: string;
   typingSpeed: number;
   holdTime: number;
+  musicEnabled: boolean;
+  musicFadeOut: number;
   fps?: number;
 }
 
-// Simple Python tokenizer for canvas rendering
 function tokenizePython(code: string): Array<{ text: string; type: string }> {
   const tokens: Array<{ text: string; type: string }> = [];
-  
-  const keywords = new Set([
-    "def", "class", "if", "elif", "else", "for", "while", "return", "import",
-    "from", "as", "try", "except", "finally", "with", "lambda", "yield", "raise",
-    "pass", "break", "continue", "in", "not", "and", "or", "is", "True", "False", "None",
-    "async", "await", "global", "nonlocal", "assert", "del"
-  ]);
-  
-  const builtins = new Set([
-    "print", "len", "range", "str", "int", "float", "list", "dict", "set", "tuple",
-    "open", "input", "type", "isinstance", "hasattr", "getattr", "setattr", "sum",
-    "min", "max", "abs", "round", "sorted", "reversed", "enumerate", "zip", "map", "filter"
-  ]);
+  const keywords = new Set(["def", "class", "if", "elif", "else", "for", "while", "return", "import", "from", "as", "try", "except", "finally", "with", "lambda", "yield", "raise", "pass", "break", "continue", "in", "not", "and", "or", "is", "True", "False", "None", "async", "await", "global", "nonlocal", "assert", "del"]);
+  const builtins = new Set(["print", "len", "range", "str", "int", "float", "list", "dict", "set", "tuple", "open", "input", "type", "isinstance", "hasattr", "getattr", "setattr", "sum", "min", "max", "abs", "round", "sorted", "reversed", "enumerate", "zip", "map", "filter"]);
   
   let i = 0;
   while (i < code.length) {
-    // Comments
     if (code[i] === "#") {
       let end = i;
-      while (end < code.length && code[end] !== "\n") end++;
+      while (end < code.length && code[end] !== "
+") end++;
       tokens.push({ text: code.slice(i, end), type: "comment" });
-      i = end;
-      continue;
+      i = end; continue;
     }
-    
-    // Strings (single, double, triple quotes)
     if (code[i] === '"' || code[i] === "'") {
       const quote = code[i];
       const triple = code.slice(i, i + 3) === quote.repeat(3);
@@ -103,184 +88,103 @@ function tokenizePython(code: string): Array<{ text: string; type: string }> {
       let end = i + (triple ? 3 : 1);
       while (end < code.length) {
         if (code.slice(end, end + endQuote.length) === endQuote) {
-          end += endQuote.length;
-          break;
+          end += endQuote.length; break;
         }
         if (code[end] === "\\" && end + 1 < code.length) end++;
         end++;
       }
       tokens.push({ text: code.slice(i, end), type: "string" });
-      i = end;
-      continue;
+      i = end; continue;
     }
-    
-    // Numbers
-    if (/[0-9]/.test(code[i]) || (code[i] === "." && i + 1 < code.length && /[0-9]/.test(code[i + 1]))) {
+    if (/[0-9]/.test(code[i])) {
       let end = i;
       while (end < code.length && /[0-9.eExXoObBa-fA-F_]/.test(code[end])) end++;
       tokens.push({ text: code.slice(i, end), type: "number" });
-      i = end;
-      continue;
+      i = end; continue;
     }
-    
-    // Identifiers (keywords, builtins, functions)
     if (/[a-zA-Z_]/.test(code[i])) {
       let end = i;
       while (end < code.length && /[a-zA-Z0-9_]/.test(code[end])) end++;
       const word = code.slice(i, end);
-      
       let type = "default";
       if (keywords.has(word)) type = "keyword";
       else if (builtins.has(word)) type = "builtin";
       else if (end < code.length && code[end] === "(") type = "function";
-      
       tokens.push({ text: word, type });
-      i = end;
-      continue;
+      i = end; continue;
     }
-    
-    // Decorators
     if (code[i] === "@") {
       let end = i + 1;
       while (end < code.length && /[a-zA-Z0-9_.]/.test(code[end])) end++;
       tokens.push({ text: code.slice(i, end), type: "function" });
-      i = end;
-      continue;
+      i = end; continue;
     }
-    
-    // Whitespace and newlines
     if (/\s/.test(code[i])) {
-      let end = i;
-      while (end < code.length && /\s/.test(code[end]) && code[end] !== "\n") end++;
-      if (code[i] === "\n") {
-        tokens.push({ text: "\n", type: "newline" });
-        i++;
-      } else {
+      if (code[i] === "
+") { tokens.push({ text: "
+", type: "newline" }); i++; }
+      else {
+        let end = i;
+        while (end < code.length && /\s/.test(code[end]) && code[end] !== "
+") end++;
         tokens.push({ text: code.slice(i, end), type: "whitespace" });
         i = end;
       }
       continue;
     }
-    
-    // Other characters
     tokens.push({ text: code[i], type: "default" });
     i++;
   }
-  
   return tokens;
 }
 
 export function CanvasExporter({
-  code,
-  language,
-  theme,
-  background,
-  customBackgroundColor,
-  fontSize,
-  padding,
-  showWindowChrome,
-  filename,
-  typingSpeed,
-  holdTime,
-  fps = 30,
+  code, language, theme, background, customBackgroundColor, fontSize, padding, showWindowChrome, filename, typingSpeed, holdTime, musicEnabled, musicFadeOut, fps = 30,
 }: CanvasExporterProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState("");
-  const [exportFormat, setExportFormat] = useState<"webm" | "mp4">("mp4");
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   
   const themeColors = canvasThemes[theme] || canvasThemes["terminal-dark"];
   const bgColors = canvasBackgrounds[background] || canvasBackgrounds["scale-dark"];
-  
-  // Render a single frame to canvas
-  const renderFrame = useCallback((
-    ctx: CanvasRenderingContext2D,
-    visibleChars: number,
-    width: number,
-    height: number
-  ) => {
+
+  const renderFrame = useCallback((ctx: CanvasRenderingContext2D, visibleChars: number, width: number, height: number) => {
     const actualBg = background === "custom" && customBackgroundColor ? customBackgroundColor : bgColors.bg;
     const gradientTop = background === "custom" && customBackgroundColor ? customBackgroundColor : bgColors.gradientTop;
-    
-    // Clear and draw background gradient
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
     gradient.addColorStop(0, gradientTop);
     gradient.addColorStop(1, actualBg);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
-    
-    // Draw dot pattern
     ctx.fillStyle = "rgba(255, 255, 255, 0.04)";
-    for (let y = 0; y < height; y += 24) {
-      for (let x = 0; x < width; x += 24) {
-        ctx.beginPath();
-        ctx.arc(x, y, 1, 0, Math.PI * 2);
-        ctx.fill();
-      }
+    for (let y = 0; y < height; y += 24) for (let x = 0; x < width; x += 24) {
+      ctx.beginPath(); ctx.arc(x, y, 1, 0, Math.PI * 2); ctx.fill();
     }
-    
-    // Code window dimensions
     const windowWidth = width - 80;
     const windowX = 40;
     const windowY = 200;
     const chromeHeight = showWindowChrome ? 44 : 0;
-    
-    // Draw window background
     ctx.fillStyle = themeColors.background;
-    ctx.beginPath();
-    ctx.roundRect(windowX, windowY, windowWidth, height - windowY - 80, 16);
-    ctx.fill();
-    
-    // Draw window chrome
+    ctx.beginPath(); ctx.roundRect(windowX, windowY, windowWidth, height - windowY - 80, 16); ctx.fill();
     if (showWindowChrome) {
       ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
-      ctx.beginPath();
-      ctx.roundRect(windowX, windowY, windowWidth, chromeHeight, [16, 16, 0, 0]);
-      ctx.fill();
-      
-      // Traffic lights
+      ctx.beginPath(); ctx.roundRect(windowX, windowY, windowWidth, chromeHeight, [16, 16, 0, 0]); ctx.fill();
       const dotY = windowY + chromeHeight / 2;
-      const colors = ["#ff5f56", "#ffbd2e", "#27c93f"];
-      colors.forEach((color, i) => {
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(windowX + 24 + i * 20, dotY, 6, 0, Math.PI * 2);
-        ctx.fill();
+      ["#ff5f56", "#ffbd2e", "#27c93f"].forEach((color, i) => {
+        ctx.fillStyle = color; ctx.beginPath(); ctx.arc(windowX + 24 + i * 20, dotY, 6, 0, Math.PI * 2); ctx.fill();
       });
-      
-      // Filename
-      ctx.fillStyle = themeColors.foreground;
-      ctx.globalAlpha = 0.6;
-      ctx.font = "14px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(filename, windowX + windowWidth / 2, dotY + 4);
-      ctx.globalAlpha = 1;
-      ctx.textAlign = "left";
+      ctx.fillStyle = themeColors.foreground; ctx.globalAlpha = 0.6; ctx.font = "14px monospace"; ctx.textAlign = "center";
+      ctx.fillText(filename, windowX + windowWidth / 2, dotY + 4); ctx.globalAlpha = 1; ctx.textAlign = "left";
     }
-    
-    // Render code with syntax highlighting
     const codeX = windowX + padding;
     let codeY = windowY + chromeHeight + padding + fontSize;
     const lineHeight = fontSize * 1.6;
-    
     ctx.font = `${fontSize}px "JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace`;
-    
     const visibleCode = code.slice(0, visibleChars);
-    const tokens = language === "plaintext" 
-      ? [{ text: visibleCode, type: "default" }]
-      : tokenizePython(visibleCode);
-    
+    const tokens = language === "plaintext" ? [{ text: visibleCode, type: "default" }] : tokenizePython(visibleCode);
     let currentX = codeX;
-    
     for (const token of tokens) {
-      if (token.type === "newline") {
-        codeY += lineHeight;
-        currentX = codeX;
-        continue;
-      }
-      
-      // Set color based on token type
+      if (token.type === "newline") { codeY += lineHeight; currentX = codeX; continue; }
       switch (token.type) {
         case "keyword": ctx.fillStyle = themeColors.keyword; break;
         case "string": ctx.fillStyle = themeColors.string; break;
@@ -290,182 +194,90 @@ export function CanvasExporter({
         case "builtin": ctx.fillStyle = themeColors.builtin; break;
         default: ctx.fillStyle = themeColors.foreground;
       }
-      
       ctx.fillText(token.text, currentX, codeY);
       currentX += ctx.measureText(token.text).width;
     }
-    
-    // Draw cursor
     if (visibleChars < code.length) {
-      ctx.fillStyle = themeColors.foreground;
-      ctx.fillRect(currentX + 2, codeY - fontSize + 4, 3, fontSize * 1.2);
+      ctx.fillStyle = themeColors.foreground; ctx.fillRect(currentX + 2, codeY - fontSize + 4, 3, fontSize * 1.2);
     }
   }, [code, language, theme, background, customBackgroundColor, fontSize, padding, showWindowChrome, filename, themeColors, bgColors]);
-  
+
   const handleExport = useCallback(async () => {
     if (isExporting) return;
-    
-    setIsExporting(true);
-    setExportProgress(0);
-    setExportStatus("Preparing...");
-    
+    setIsExporting(true); setExportProgress(0); setExportStatus("Preparing FFmpeg...");
     try {
-      const width = 1080;
-      const height = 1920;
-      
-      // Create canvas
+      const width = 1080; const height = 1920;
       const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas not available");
-      
-      // Calculate frames
+
+      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+      const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
+      const ffmpeg = new FFmpeg();
+      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+      });
+
       const typingFrames = Math.ceil((code.length / typingSpeed) * fps);
       const holdFrames = Math.ceil(holdTime * fps);
       const totalFrames = typingFrames + holdFrames;
-      
-      // Setup recorder
-      const stream = canvas.captureStream(fps);
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "video/webm;codecs=vp9",
-        videoBitsPerSecond: 8000000,
-      });
-      
-      const chunks: Blob[] = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-      
-      const recordingPromise = new Promise<Blob>((resolve) => {
-        mediaRecorder.onstop = () => resolve(new Blob(chunks, { type: "video/webm" }));
-      });
-      
-      mediaRecorder.start(100);
+      const totalDuration = totalFrames / fps;
+
       setExportStatus("Rendering frames...");
-      
-      // Render each frame
       for (let frame = 0; frame < totalFrames; frame++) {
-        const visibleChars = Math.min(
-          code.length,
-          Math.floor((frame / typingFrames) * code.length)
-        );
-        
-        renderFrame(ctx, visibleChars >= code.length ? code.length : visibleChars, width, height);
-        
-        // Wait for frame timing (33ms for 30fps)
-        await new Promise(r => setTimeout(r, 1000 / fps));
-        
-        setExportProgress((frame + 1) / totalFrames);
-        if ((frame + 1) % 30 === 0) {
-          setExportStatus(`Rendering... ${Math.round(((frame + 1) / totalFrames) * 100)}%`);
-        }
+        const visibleChars = Math.min(code.length, Math.floor((frame / typingFrames) * code.length));
+        renderFrame(ctx, visibleChars, width, height);
+        const blob = await new Promise<Blob>((r) => canvas.toBlob((b) => r(b!), "image/png"));
+        await ffmpeg.writeFile(`f${frame.toString().padStart(5, "0")}.png`, await fetchFile(blob));
+        setExportProgress((frame + 1) / totalFrames * 0.4);
+        if (frame % 30 === 0) setExportStatus(`Rendering... ${Math.round(((frame + 1) / totalFrames) * 100)}%`);
       }
-      
-      mediaRecorder.stop();
-      setExportStatus("Processing...");
-      const webmBlob = await recordingPromise;
-      
-      // Convert to MP4 if needed
-      let finalBlob = webmBlob;
-      let ext = "webm";
-      
-      if (exportFormat === "mp4") {
-        setExportStatus("Converting to MP4...");
+
+      const args = ["-framerate", fps.toString(), "-i", "f%05d.png"];
+      if (musicEnabled) {
+        setExportStatus("Adding music...");
         try {
-          const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-          const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
-          
-          const ffmpeg = new FFmpeg();
-          const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
-          
-          await ffmpeg.load({
-            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-          });
-          
-          await ffmpeg.writeFile("input.webm", await fetchFile(webmBlob));
-          await ffmpeg.exec([
-            "-i", "input.webm",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-            "output.mp4"
-          ]);
-          
-          const data = await ffmpeg.readFile("output.mp4");
-          finalBlob = new Blob([data], { type: "video/mp4" });
-          ext = "mp4";
-        } catch {
-          setExportStatus("MP4 failed, using WebM...");
-          await new Promise(r => setTimeout(r, 1000));
-        }
+          const musicRes = await fetch("/music/black-eyed-peas-rock-that-body.mp3");
+          if (musicRes.ok) {
+            const musicBlob = await musicRes.blob();
+            await ffmpeg.writeFile("audio.mp3", await fetchFile(musicBlob));
+            args.push("-i", "audio.mp3", "-t", totalDuration.toString());
+            if (musicFadeOut > 0) {
+              args.push("-filter_complex", `[1:a]afade=t=out:st=${Math.max(0, totalDuration - musicFadeOut)}:d=${musicFadeOut}[a]`, "-map", "0:v", "-map", "[a]");
+            } else {
+              args.push("-map", "0:v", "-map", "1:a");
+            }
+          }
+        } catch (e) { console.error("Music fetch failed", e); }
       }
-      
-      // Download
+
+      args.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", "-crf", "23", "output.mp4");
+      setExportStatus("Encoding MP4...");
+      await ffmpeg.exec(args);
+
+      const data = await ffmpeg.readFile("output.mp4");
+      const finalBlob = new Blob([data], { type: "video/mp4" });
       const url = URL.createObjectURL(finalBlob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = `${filename.replace(/\.[^/.]+$/, "") || "code_video"}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
+      a.href = url; a.download = `${filename.replace(/\.[^/.]+$/, "") || "code_video"}.mp4`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setExportStatus("Done!");
     } catch (error) {
       setExportStatus(`Error: ${error instanceof Error ? error.message : "Unknown"}`);
     } finally {
-      setTimeout(() => {
-        setIsExporting(false);
-        setExportProgress(0);
-        setExportStatus("");
-      }, 2000);
+      setTimeout(() => { setIsExporting(false); setExportStatus(""); }, 2000);
     }
-  }, [isExporting, code, typingSpeed, holdTime, fps, exportFormat, filename, renderFrame]);
-  
-  const totalDuration = ((code.length / typingSpeed) + holdTime).toFixed(1);
-  
+  }, [code, typingSpeed, holdTime, fps, filename, renderFrame, musicEnabled, musicFadeOut, isExporting]);
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <Select value={exportFormat} onValueChange={(v) => setExportFormat(v as "webm" | "mp4")} disabled={isExporting}>
-          <SelectTrigger className="w-24">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="mp4">MP4</SelectItem>
-            <SelectItem value="webm">WebM</SelectItem>
-          </SelectContent>
-        </Select>
-        
-        <Button onClick={handleExport} disabled={isExporting} className="flex-1 gap-2">
-          {isExporting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Exporting...
-            </>
-          ) : (
-            <>
-              <Download className="h-4 w-4" />
-              Download Video ({totalDuration}s)
-            </>
-          )}
-        </Button>
-      </div>
-      
-      {isExporting && (
-        <div className="space-y-2">
-          <div className="h-2 bg-muted rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-primary transition-all duration-100" 
-              style={{ width: `${exportProgress * 100}%` }} 
-            />
-          </div>
-          <p className="text-center text-xs text-muted-foreground">
-            {exportStatus} ({Math.round(exportProgress * 100)}%)
-          </p>
-        </div>
-      )}
+      <Button onClick={handleExport} disabled={isExporting} className="w-full gap-2" size="lg">
+        {isExporting ? <><Loader2 className="h-4 w-4 animate-spin" /> {Math.round(exportProgress * 100)}%</> : <><Download className="h-4 w-4" /> Download MP4 with Music</>}
+      </Button>
+      {exportStatus && <p className="text-center text-xs text-muted-foreground">{exportStatus}</p>}
     </div>
   );
 }
