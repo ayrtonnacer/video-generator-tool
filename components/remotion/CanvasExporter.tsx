@@ -332,13 +332,13 @@ export function CanvasExporter({
     ]
   );
 
-  // ── handleExport: uses MediaRecorder to capture canvas stream ──────────────
+  // ── handleExport: renders to canvas, then sends to server for MP4 conversion ──
 
   const handleExport = useCallback(async () => {
     if (isExporting) return;
     setIsExporting(true);
     setExportProgress(0);
-    setExportStatus("Preparing export...");
+    setExportStatus("Rendering frames...");
     cancelRef.current = false;
 
     try {
@@ -350,198 +350,99 @@ export function CanvasExporter({
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Canvas not available");
+      if (!ctx) throw new Error("Canvas context not available");
 
       // Calculate timing
       const typingFrames = Math.ceil((code.length / typingSpeed) * fps);
       const holdFrames = Math.ceil(holdTime * fps);
       const totalFrames = typingFrames + holdFrames;
-      const totalDuration = totalFrames / fps;
-      const frameInterval = 1000 / fps;
 
-      // Setup audio context for mixing
-      let audioContext: AudioContext | null = null;
-      let audioBuffer: AudioBuffer | null = null;
-      let audioDestination: MediaStreamAudioDestinationNode | null = null;
-      let audioSource: AudioBufferSourceNode | null = null;
-      let gainNode: GainNode | null = null;
+      // Render all frames to canvas
+      const frameDataArray: ImageData[] = [];
+      
+      for (let frame = 0; frame < totalFrames; frame++) {
+        if (cancelRef.current) {
+          setExportStatus("Cancelled");
+          setIsExporting(false);
+          return;
+        }
 
-      if (musicEnabled) {
-        setExportStatus("Loading music...");
-        try {
-          const musicRes = await fetch("/background-music.mp3");
-          if (musicRes.ok) {
-            audioContext = new AudioContext();
-            const arrayBuffer = await musicRes.arrayBuffer();
-            audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-            audioDestination = audioContext.createMediaStreamDestination();
-            gainNode = audioContext.createGain();
-            gainNode.connect(audioDestination);
-          }
-        } catch (e) {
-          console.warn("Could not load music:", e);
+        // Calculate visible characters
+        const visibleChars = Math.min(
+          code.length,
+          frame < typingFrames 
+            ? Math.floor((frame / typingFrames) * code.length) 
+            : code.length
+        );
+
+        // Render the frame
+        renderFrame(ctx, visibleChars, width, height);
+
+        // Get frame data
+        const imageData = ctx.getImageData(0, 0, width, height);
+        frameDataArray.push(imageData);
+
+        // Update progress
+        const pct = (frame + 1) / totalFrames;
+        setExportProgress(pct * 0.5);
+        if (frame % 30 === 0) {
+          setExportStatus(`Rendering... ${Math.round(pct * 100)}%`);
         }
       }
 
-      // Get canvas stream
-      const canvasStream = canvas.captureStream(fps);
-      
-      // Combine video and audio streams
-      const tracks = [...canvasStream.getVideoTracks()];
-      if (audioDestination) {
-        tracks.push(...audioDestination.stream.getAudioTracks());
-      }
-      const combinedStream = new MediaStream(tracks);
+      console.log("[v0] Rendered all frames:", frameDataArray.length);
 
-      // Setup MediaRecorder with best available codec
-      const mimeTypes = [
-        "video/webm;codecs=vp9,opus",
-        "video/webm;codecs=vp8,opus",
-        "video/webm;codecs=vp9",
-        "video/webm;codecs=vp8",
-        "video/webm",
-        "video/mp4",
-      ];
-      
-      let mimeType = "";
-      for (const type of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(type)) {
-          mimeType = type;
-          break;
-        }
-      }
-      
-      if (!mimeType) {
-        throw new Error("No supported video format found");
-      }
+      // Send frames to server for MP4 conversion
+      setExportStatus("Converting to MP4...");
+      setExportProgress(0.5);
 
-      const chunks: Blob[] = [];
-      const recorder = new MediaRecorder(combinedStream, {
-        mimeType,
-        videoBitsPerSecond: 8000000, // 8 Mbps for good quality
+      const response = await fetch("/api/render-mp4", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          frames: frameDataArray.map((fd) => {
+            // Convert ImageData to base64
+            const canvas2 = document.createElement("canvas");
+            canvas2.width = width;
+            canvas2.height = height;
+            const ctx2 = canvas2.getContext("2d");
+            if (ctx2) {
+              ctx2.putImageData(fd, 0, 0);
+              return canvas2.toDataURL("image/png");
+            }
+            return "";
+          }),
+          fps,
+          musicEnabled,
+          musicFadeOut,
+          filename,
+        }),
       });
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunks.push(e.data);
-        }
-      };
-
-      const recordingPromise = new Promise<Blob>((resolve, reject) => {
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: mimeType });
-          resolve(blob);
-        };
-        recorder.onerror = (e) => reject(e);
-      });
-
-      // Start recording
-      recorder.start(100); // Collect data every 100ms
-
-      // Start audio if available
-      if (audioContext && audioBuffer && audioDestination && gainNode) {
-        audioSource = audioContext.createBufferSource();
-        audioSource.buffer = audioBuffer;
-        audioSource.connect(gainNode);
-        
-        // Setup fade out
-        if (musicFadeOut > 0) {
-          const fadeStart = Math.max(0, totalDuration - musicFadeOut);
-          gainNode.gain.setValueAtTime(1, audioContext.currentTime + fadeStart);
-          gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + totalDuration);
-        }
-        
-        audioSource.start(0);
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.statusText}`);
       }
 
-      // Render frames
-      setExportStatus("Recording video...");
-      
-      let frame = 0;
-      const startTime = performance.now();
-      
-      const renderLoop = () => {
-        return new Promise<void>((resolve) => {
-          const renderNextFrame = () => {
-            if (cancelRef.current) {
-              recorder.stop();
-              if (audioSource) {
-                try { audioSource.stop(); } catch {}
-              }
-              resolve();
-              return;
-            }
-
-            if (frame >= totalFrames) {
-              // Done rendering
-              setTimeout(() => {
-                recorder.stop();
-                if (audioSource) {
-                  try { audioSource.stop(); } catch {}
-                }
-                resolve();
-              }, 100); // Small delay to ensure last frame is captured
-              return;
-            }
-
-            // Calculate visible characters
-            const visibleChars = Math.min(
-              code.length,
-              frame < typingFrames ? Math.floor((frame / typingFrames) * code.length) : code.length
-            );
-
-            // Render the frame
-            renderFrame(ctx, visibleChars, width, height);
-
-            // Update progress
-            const pct = (frame + 1) / totalFrames;
-            setExportProgress(pct * 0.9);
-            if (frame % 30 === 0) {
-              setExportStatus(`Recording... ${Math.round(pct * 100)}%`);
-            }
-
-            frame++;
-
-            // Schedule next frame
-            const elapsed = performance.now() - startTime;
-            const targetTime = frame * frameInterval;
-            const delay = Math.max(0, targetTime - elapsed);
-            
-            setTimeout(renderNextFrame, delay);
-          };
-
-          renderNextFrame();
-        });
-      };
-
-      await renderLoop();
-
-      // Wait for recording to finish
-      setExportStatus("Finalizing video...");
-      setExportProgress(0.95);
-      
-      const videoBlob = await recordingPromise;
-
-      // Cleanup audio
-      if (audioContext) {
-        audioContext.close();
-      }
+      // Get the video blob
+      const blob = await response.blob();
+      console.log("[v0] Received MP4 blob:", blob.size, "bytes");
 
       // Download
-      const url = URL.createObjectURL(videoBlob);
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      const extension = mimeType.includes("mp4") ? "mp4" : "webm";
-      a.download = `${filename.replace(/\.[^/.]+$/, "") || "code_video"}.${extension}`;
+      a.download = `${filename.replace(/\.[^/.]+$/, "") || "code_video"}.mp4`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
       setExportProgress(1);
-      setExportStatus("Done!");
+      setExportStatus("Download complete!");
     } catch (error) {
-      console.error("Export failed:", error);
+      console.error("[v0] Export failed:", error);
       setExportStatus(
         `Error: ${error instanceof Error ? error.message : "Unknown error"}`
       );
@@ -585,7 +486,7 @@ export function CanvasExporter({
         ) : (
           <>
             <Download className="h-4 w-4" />
-            Download Video {musicEnabled ? "with Music" : ""}
+            Download MP4 {musicEnabled ? "with Music" : ""}
           </>
         )}
       </Button>
