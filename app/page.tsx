@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Film, Code2, Music, Palette } from "lucide-react";
+import { Film, Code2, Music, Monitor } from "lucide-react";
 import { themeOptions, backgroundOptions, themeNames, backgroundNames, type CodeThemeName, type BackgroundName } from "@/components/remotion/CodeVideo";
 
 const RemotionPlayer = dynamic(() => import("@/components/remotion/RemotionPlayer").then((mod) => mod.RemotionPlayer), { ssr: false });
@@ -38,10 +38,8 @@ export default function Home() {
   const [holdTime, setHoldTime] = useState(2);
   const [musicEnabled, setMusicEnabled] = useState(true);
   const [musicFadeOut, setMusicFadeOut] = useState(2);
-  const [duration, setDuration] = useState(0);
-
-  const handleDurationChange = useCallback((newDuration: number) => {
-    setDuration(newDuration);
+  const handleDurationChange = useCallback((_newDuration: number) => {
+    // Duration is tracked by RemotionPlayer internally
   }, []);
 
   return (
@@ -120,6 +118,52 @@ export default function Home() {
                     </div>
                     <Slider value={[fontSize]} onValueChange={([v]) => setFontSize(v)} min={14} max={32} />
                   </Field>
+                </TabsContent>
+
+                <TabsContent value="background" className="space-y-4">
+                  <Field>
+                    <FieldLabel>Background Style</FieldLabel>
+                    <Select value={background} onValueChange={(v) => setBackground(v as BackgroundName)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {backgroundOptions.map((bg) => (
+                          <SelectItem key={bg} value={bg}>{backgroundNames[bg].name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {background === "custom" && (
+                    <Field>
+                      <FieldLabel>Custom Color</FieldLabel>
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="color"
+                          value={customBackgroundColor}
+                          onChange={(e) => setCustomBackgroundColor(e.target.value)}
+                          className="w-10 h-10 rounded border border-border cursor-pointer"
+                        />
+                        <Input
+                          value={customBackgroundColor}
+                          onChange={(e) => setCustomBackgroundColor(e.target.value)}
+                          className="flex-1 font-mono"
+                        />
+                      </div>
+                    </Field>
+                  )}
+                  <Field>
+                    <div className="flex items-center justify-between">
+                      <FieldLabel>Padding</FieldLabel>
+                      <span className="text-sm text-muted-foreground">{padding}px</span>
+                    </div>
+                    <Slider value={[padding]} onValueChange={([v]) => setPadding(v)} min={16} max={80} />
+                  </Field>
+                  <div className="p-4 bg-muted rounded-lg flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Monitor className="h-5 w-5 text-muted-foreground" />
+                      <label className="text-sm font-medium">Window Chrome</label>
+                    </div>
+                    <Switch checked={showWindowChrome} onCheckedChange={setShowWindowChrome} />
+                  </div>
                 </TabsContent>
 
                 <TabsContent value="animation" className="space-y-4">
