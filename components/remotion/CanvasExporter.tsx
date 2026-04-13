@@ -98,7 +98,6 @@ export function CanvasExporter({
 
         const snap = await html2canvas(container, {
           useCORS: true,
-          allowTaint: true,
           scale: 1,
           width: 1080,
           height: 1920,
@@ -106,9 +105,20 @@ export function CanvasExporter({
           backgroundColor: null,
         });
 
-        const blob = await new Promise<Blob>((res) =>
-          snap.toBlob((b) => res(b!), "image/png")
-        );
+        const blob = await new Promise<Blob>((res, rej) => {
+          try {
+            snap.toBlob((b) => {
+              if (b) res(b);
+              else rej(new Error("html2canvas returned null, possibly tainted/blocked by CORS."));
+            }, "image/png");
+          } catch (err) {
+            rej(err);
+          }
+        });
+        
+        // Free up html2canvas memory immediately to prevent mobile/Vercel crashes
+        snap.width = 0;
+        snap.height = 0;
 
         await ffmpeg.writeFile(
           `f${frame.toString().padStart(5, "0")}.png`,
@@ -235,12 +245,13 @@ export function CanvasExporter({
         style={{
           position: "fixed",
           top: 0,
-          left: "-2200px",
+          left: 0,
           width: 1080,
           height: 1920,
           overflow: "hidden",
           pointerEvents: "none",
-          zIndex: -1,
+          opacity: 0.01,
+          zIndex: -50,
         }}
       >
         <Player
