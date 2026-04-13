@@ -1,7 +1,7 @@
 "use client";
 
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, Audio } from "remotion";
-import { useMemo } from "react";
+import React, { useMemo } from "react";
 import hljs from "highlight.js/lib/core";
 import python from "highlight.js/lib/languages/python";
 
