@@ -119,13 +119,10 @@ function tokenizePython(code: string): Array<{ text: string; type: string }> {
       i = end; continue;
     }
     if (/\s/.test(code[i])) {
-      if (code[i] === "
-") { tokens.push({ text: "
-", type: "newline" }); i++; }
+      if (code[i] === "\n") { tokens.push({ text: "\n", type: "newline" }); i++; }
       else {
         let end = i;
-        while (end < code.length && /\s/.test(code[end]) && code[end] !== "
-") end++;
+        while (end < code.length && /\s/.test(code[end]) && code[end] !== "\n") end++;
         tokens.push({ text: code.slice(i, end), type: "whitespace" });
         i = end;
       }
