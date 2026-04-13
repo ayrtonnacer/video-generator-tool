@@ -240,7 +240,7 @@ export function CanvasExporter({
       if (musicEnabled) {
         setExportStatus("Adding music...");
         try {
-          const musicRes = await fetch("/music/black-eyed-peas-rock-that-body.mp3");
+          const musicRes = await fetch("/audio/black-eyed-peas-rock-that-body-sped-up.mp3");
           if (musicRes.ok) {
             const musicBlob = await musicRes.blob();
             await ffmpeg.writeFile("audio.mp3", await fetchFile(musicBlob));
