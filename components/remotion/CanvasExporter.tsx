@@ -352,29 +352,29 @@ export function CanvasExporter({
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas context not available");
 
-      // Load FFmpeg.wasm
-      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-      const { fetchFile } = await import("@ffmpeg/util");
+      // Load FFmpeg.wasm using toBlobURL to avoid CORS and bundler issues
+      const FFmpegModule = await import("@ffmpeg/ffmpeg");
+      const FFmpegUtil = await import("@ffmpeg/util");
+      const { FFmpeg } = FFmpegModule;
+      const { fetchFile, toBlobURL } = FFmpegUtil;
       
       const ffmpeg = new FFmpeg();
       
-      // Use single-threaded version that doesn't require SharedArrayBuffer
-      const baseURL = "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/esm";
+      setExportStatus("Downloading FFmpeg (first time only)...");
       
-      try {
-        await ffmpeg.load({
-          coreURL: `${baseURL}/ffmpeg-core.js`,
-          wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-          workerURL: `${baseURL}/ffmpeg-core.worker.js`,
-        });
-      } catch {
-        // Fallback to single-threaded version
-        const stBaseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
-        await ffmpeg.load({
-          coreURL: `${stBaseURL}/ffmpeg-core.js`,
-          wasmURL: `${stBaseURL}/ffmpeg-core.wasm`,
-        });
-      }
+      // Use single-threaded version - more compatible, doesn't require SharedArrayBuffer
+      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+      
+      const coreURL = await toBlobURL(
+        `${baseURL}/ffmpeg-core.js`,
+        "text/javascript"
+      );
+      const wasmURL = await toBlobURL(
+        `${baseURL}/ffmpeg-core.wasm`,
+        "application/wasm"
+      );
+      
+      await ffmpeg.load({ coreURL, wasmURL });
 
       setExportStatus("Rendering frames...");
 
