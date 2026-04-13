@@ -361,9 +361,3 @@ export const CodeVideo: React.FC<CodeVideoProps> = ({
     </AbsoluteFill>
   );
 };
-
-// Export options for the UI
-export const themeOptions = Object.keys(codeThemes) as CodeThemeName[];
-export const backgroundOptions = Object.keys(backgroundStyles) as BackgroundName[];
-export const themeNames = codeThemes;
-export const backgroundNames = backgroundStyles;
