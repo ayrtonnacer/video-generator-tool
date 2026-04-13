@@ -76,8 +76,7 @@ function tokenizePython(code: string): Array<{ text: string; type: string }> {
   while (i < code.length) {
     if (code[i] === "#") {
       let end = i;
-      while (end < code.length && code[end] !== "
-") end++;
+      while (end < code.length && code[end] !== "\n") end++;
       tokens.push({ text: code.slice(i, end), type: "comment" });
       i = end; continue;
     }
