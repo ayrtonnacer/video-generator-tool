@@ -100,6 +100,10 @@ const backgroundStyles = {
 export type CodeThemeName = keyof typeof codeThemes;
 export type BackgroundName = keyof typeof backgroundStyles;
 
+export const themeOptions = Object.keys(codeThemes) as CodeThemeName[];
+export const backgroundOptions = Object.keys(backgroundStyles) as BackgroundName[];
+export const themeNames = codeThemes;
+export const backgroundNames = backgroundStyles;
 interface CodeVideoProps {
   code: string;
   language: string;
