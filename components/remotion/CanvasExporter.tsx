@@ -332,13 +332,13 @@ export function CanvasExporter({
     ]
   );
 
-  // ── handleExport: renders to canvas, then sends to server for MP4 conversion ──
+  // ── handleExport: renders frames and uses FFmpeg.wasm in browser ──
 
   const handleExport = useCallback(async () => {
     if (isExporting) return;
     setIsExporting(true);
     setExportProgress(0);
-    setExportStatus("Rendering frames...");
+    setExportStatus("Loading FFmpeg...");
     cancelRef.current = false;
 
     try {
@@ -352,14 +352,38 @@ export function CanvasExporter({
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas context not available");
 
+      // Load FFmpeg.wasm
+      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+      const { fetchFile } = await import("@ffmpeg/util");
+      
+      const ffmpeg = new FFmpeg();
+      
+      // Use single-threaded version that doesn't require SharedArrayBuffer
+      const baseURL = "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/esm";
+      
+      try {
+        await ffmpeg.load({
+          coreURL: `${baseURL}/ffmpeg-core.js`,
+          wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+          workerURL: `${baseURL}/ffmpeg-core.worker.js`,
+        });
+      } catch {
+        // Fallback to single-threaded version
+        const stBaseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+        await ffmpeg.load({
+          coreURL: `${stBaseURL}/ffmpeg-core.js`,
+          wasmURL: `${stBaseURL}/ffmpeg-core.wasm`,
+        });
+      }
+
+      setExportStatus("Rendering frames...");
+
       // Calculate timing
       const typingFrames = Math.ceil((code.length / typingSpeed) * fps);
       const holdFrames = Math.ceil(holdTime * fps);
       const totalFrames = typingFrames + holdFrames;
 
-      // Render all frames to canvas
-      const frameDataArray: ImageData[] = [];
-      
+      // Render and write frames directly to FFmpeg
       for (let frame = 0; frame < totalFrames; frame++) {
         if (cancelRef.current) {
           setExportStatus("Cancelled");
@@ -378,59 +402,119 @@ export function CanvasExporter({
         // Render the frame
         renderFrame(ctx, visibleChars, width, height);
 
-        // Get frame data
-        const imageData = ctx.getImageData(0, 0, width, height);
-        frameDataArray.push(imageData);
+        // Convert canvas to PNG blob and write to FFmpeg
+        const blob = await new Promise<Blob>((resolve) => {
+          canvas.toBlob((b) => resolve(b!), "image/png");
+        });
+        const frameData = await fetchFile(blob);
+        const frameName = `frame${String(frame).padStart(6, "0")}.png`;
+        await ffmpeg.writeFile(frameName, frameData);
 
         // Update progress
         const pct = (frame + 1) / totalFrames;
-        setExportProgress(pct * 0.5);
-        if (frame % 30 === 0) {
-          setExportStatus(`Rendering... ${Math.round(pct * 100)}%`);
+        setExportProgress(pct * 0.6);
+        if (frame % 10 === 0) {
+          setExportStatus(`Rendering frame ${frame + 1}/${totalFrames}`);
         }
       }
 
-      console.log("[v0] Rendered all frames:", frameDataArray.length);
+      setExportStatus("Encoding video...");
+      setExportProgress(0.6);
 
-      // Send frames to server for MP4 conversion
-      setExportStatus("Converting to MP4...");
-      setExportProgress(0.5);
+      // Calculate total duration
+      const totalDuration = totalFrames / fps;
 
-      const response = await fetch("/api/render-mp4", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          frames: frameDataArray.map((fd) => {
-            // Convert ImageData to base64
-            const canvas2 = document.createElement("canvas");
-            canvas2.width = width;
-            canvas2.height = height;
-            const ctx2 = canvas2.getContext("2d");
-            if (ctx2) {
-              ctx2.putImageData(fd, 0, 0);
-              return canvas2.toDataURL("image/png");
+      // Build FFmpeg command
+      let ffmpegArgs: string[];
+
+      if (musicEnabled) {
+        // Fetch the music file
+        try {
+          const musicResponse = await fetch("/background-music.mp3");
+          if (musicResponse.ok) {
+            const musicBlob = await musicResponse.blob();
+            const musicData = await fetchFile(musicBlob);
+            await ffmpeg.writeFile("music.mp3", musicData);
+
+            if (musicFadeOut > 0) {
+              const fadeStart = Math.max(0, totalDuration - musicFadeOut);
+              ffmpegArgs = [
+                "-framerate", String(fps),
+                "-i", "frame%06d.png",
+                "-i", "music.mp3",
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-af", `afade=t=out:st=${fadeStart}:d=${musicFadeOut}`,
+                "-shortest",
+                "-movflags", "+faststart",
+                "output.mp4"
+              ];
+            } else {
+              ffmpegArgs = [
+                "-framerate", String(fps),
+                "-i", "frame%06d.png",
+                "-i", "music.mp3",
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-shortest",
+                "-movflags", "+faststart",
+                "output.mp4"
+              ];
             }
-            return "";
-          }),
-          fps,
-          musicEnabled,
-          musicFadeOut,
-          filename,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.statusText}`);
+          } else {
+            throw new Error("Music file not found");
+          }
+        } catch {
+          // Fallback to video only if music fails
+          ffmpegArgs = [
+            "-framerate", String(fps),
+            "-i", "frame%06d.png",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            "output.mp4"
+          ];
+        }
+      } else {
+        ffmpegArgs = [
+          "-framerate", String(fps),
+          "-i", "frame%06d.png",
+          "-c:v", "libx264",
+          "-preset", "fast",
+          "-crf", "23",
+          "-pix_fmt", "yuv420p",
+          "-movflags", "+faststart",
+          "output.mp4"
+        ];
       }
 
-      // Get the video blob
-      const blob = await response.blob();
-      console.log("[v0] Received MP4 blob:", blob.size, "bytes");
+      ffmpeg.on("progress", ({ progress }) => {
+        if (progress !== undefined) {
+          setExportProgress(0.6 + progress * 0.35);
+        }
+      });
+
+      await ffmpeg.exec(ffmpegArgs);
+
+      setExportStatus("Preparing download...");
+      setExportProgress(0.95);
+
+      // Read the output file
+      const outputData = await ffmpeg.readFile("output.mp4");
+      const videoBlob = new Blob([outputData], { type: "video/mp4" });
 
       // Download
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(videoBlob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `${filename.replace(/\.[^/.]+$/, "") || "code_video"}.mp4`;
@@ -442,7 +526,7 @@ export function CanvasExporter({
       setExportProgress(1);
       setExportStatus("Download complete!");
     } catch (error) {
-      console.error("[v0] Export failed:", error);
+      console.error("Export failed:", error);
       setExportStatus(
         `Error: ${error instanceof Error ? error.message : "Unknown error"}`
       );
