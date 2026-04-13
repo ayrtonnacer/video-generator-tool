@@ -205,7 +205,7 @@ export const CodeVideo: React.FC<CodeVideoProps> = ({
       {/* Background music with fade out */}
       {musicEnabled && (
         <Audio 
-          src="/audio/background-music.mp3"
+          src="/background-music.mp3"
           volume={(f) => {
             const fadeOutFrames = musicFadeOut * fps;
             const fadeStartFrame = totalDuration - fadeOutFrames;
