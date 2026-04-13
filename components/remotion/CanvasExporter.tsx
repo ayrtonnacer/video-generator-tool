@@ -3,10 +3,6 @@
 import { useCallback, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Download, Loader2 } from "lucide-react";
-import hljs from "highlight.js/lib/core";
-import python from "highlight.js/lib/languages/python";
-
-hljs.registerLanguage("python", python);
 
 // ─── Theme & background palettes (must match CodeVideo.tsx) ──────────────────
 
@@ -188,6 +184,7 @@ export function CanvasExporter({
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState("");
+  const cancelRef = useRef(false);
 
   const themeColors = canvasThemes[theme] || canvasThemes["terminal-dark"];
   const bgColors =
@@ -335,174 +332,225 @@ export function CanvasExporter({
     ]
   );
 
-  // ── handleExport: renders all frames → FFmpeg → MP4 download ──────────────
+  // ── handleExport: uses MediaRecorder to capture canvas stream ──────────────
 
   const handleExport = useCallback(async () => {
     if (isExporting) return;
     setIsExporting(true);
     setExportProgress(0);
-    setExportStatus("Preparing FFmpeg…");
+    setExportStatus("Preparing export...");
+    cancelRef.current = false;
 
     try {
       const width = 1080;
       const height = 1920;
 
-      // Off-screen canvas
+      // Create off-screen canvas
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas not available");
 
-      // Load FFmpeg
-      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-      const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
-      const ffmpeg = new FFmpeg();
-
-      ffmpeg.on("progress", ({ progress: p }) => {
-        if (p !== undefined) setExportProgress(0.7 + p * 0.25);
-      });
-
-      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
-      await ffmpeg.load({
-        coreURL: await toBlobURL(
-          `${baseURL}/ffmpeg-core.js`,
-          "text/javascript"
-        ),
-        wasmURL: await toBlobURL(
-          `${baseURL}/ffmpeg-core.wasm`,
-          "application/wasm"
-        ),
-      });
-
-      // Calculate frame counts
+      // Calculate timing
       const typingFrames = Math.ceil((code.length / typingSpeed) * fps);
       const holdFrames = Math.ceil(holdTime * fps);
       const totalFrames = typingFrames + holdFrames;
       const totalDuration = totalFrames / fps;
+      const frameInterval = 1000 / fps;
 
-      // Render frames
-      setExportStatus("Rendering frames…");
-      for (let frame = 0; frame < totalFrames; frame++) {
-        const visibleChars = Math.min(
-          code.length,
-          Math.floor((frame / typingFrames) * code.length)
-        );
+      // Setup audio context for mixing
+      let audioContext: AudioContext | null = null;
+      let audioBuffer: AudioBuffer | null = null;
+      let audioDestination: MediaStreamAudioDestinationNode | null = null;
+      let audioSource: AudioBufferSourceNode | null = null;
+      let gainNode: GainNode | null = null;
 
-        renderFrame(ctx, visibleChars, width, height);
-
-        const blob = await new Promise<Blob>((resolve, reject) => {
-          canvas.toBlob(
-            (b) =>
-              b
-                ? resolve(b)
-                : reject(new Error("Failed to capture frame")),
-            "image/png"
-          );
-        });
-
-        await ffmpeg.writeFile(
-          `f${frame.toString().padStart(5, "0")}.png`,
-          await fetchFile(blob)
-        );
-
-        const pct = (frame + 1) / totalFrames;
-        setExportProgress(pct * 0.65);
-        if (frame % 30 === 0) {
-          setExportStatus(
-            `Rendering… ${Math.round(pct * 100)}%`
-          );
-        }
-      }
-
-      // Build FFmpeg args
-      const args: string[] = [
-        "-framerate",
-        fps.toString(),
-        "-i",
-        "f%05d.png",
-      ];
-
-      // Music
       if (musicEnabled) {
-        setExportStatus("Adding music…");
+        setExportStatus("Loading music...");
         try {
           const musicRes = await fetch("/background-music.mp3");
           if (musicRes.ok) {
-            const musicBlob = await musicRes.blob();
-            await ffmpeg.writeFile(
-              "audio.mp3",
-              await fetchFile(musicBlob)
-            );
-
-            args.push("-i", "audio.mp3", "-t", totalDuration.toString());
-
-            if (musicFadeOut > 0) {
-              const fadeStart = Math.max(0, totalDuration - musicFadeOut);
-              args.push(
-                "-filter_complex",
-                `[1:a]afade=t=out:st=${fadeStart}:d=${musicFadeOut}[a]`,
-                "-map",
-                "0:v",
-                "-map",
-                "[a]"
-              );
-            } else {
-              args.push("-map", "0:v", "-map", "1:a");
-            }
+            audioContext = new AudioContext();
+            const arrayBuffer = await musicRes.arrayBuffer();
+            audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            audioDestination = audioContext.createMediaStreamDestination();
+            gainNode = audioContext.createGain();
+            gainNode.connect(audioDestination);
           }
         } catch (e) {
-          console.error("Music fetch failed:", e);
+          console.warn("Could not load music:", e);
         }
       }
 
-      args.push(
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-preset",
-        "fast",
-        "-crf",
-        "23",
-        "output.mp4"
-      );
+      // Get canvas stream
+      const canvasStream = canvas.captureStream(fps);
+      
+      // Combine video and audio streams
+      const tracks = [...canvasStream.getVideoTracks()];
+      if (audioDestination) {
+        tracks.push(...audioDestination.stream.getAudioTracks());
+      }
+      const combinedStream = new MediaStream(tracks);
 
-      // Encode
-      setExportStatus("Encoding MP4…");
-      await ffmpeg.exec(args);
+      // Setup MediaRecorder with best available codec
+      const mimeTypes = [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm;codecs=vp9",
+        "video/webm;codecs=vp8",
+        "video/webm",
+        "video/mp4",
+      ];
+      
+      let mimeType = "";
+      for (const type of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          mimeType = type;
+          break;
+        }
+      }
+      
+      if (!mimeType) {
+        throw new Error("No supported video format found");
+      }
+
+      const chunks: Blob[] = [];
+      const recorder = new MediaRecorder(combinedStream, {
+        mimeType,
+        videoBitsPerSecond: 8000000, // 8 Mbps for good quality
+      });
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      const recordingPromise = new Promise<Blob>((resolve, reject) => {
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: mimeType });
+          resolve(blob);
+        };
+        recorder.onerror = (e) => reject(e);
+      });
+
+      // Start recording
+      recorder.start(100); // Collect data every 100ms
+
+      // Start audio if available
+      if (audioContext && audioBuffer && audioDestination && gainNode) {
+        audioSource = audioContext.createBufferSource();
+        audioSource.buffer = audioBuffer;
+        audioSource.connect(gainNode);
+        
+        // Setup fade out
+        if (musicFadeOut > 0) {
+          const fadeStart = Math.max(0, totalDuration - musicFadeOut);
+          gainNode.gain.setValueAtTime(1, audioContext.currentTime + fadeStart);
+          gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + totalDuration);
+        }
+        
+        audioSource.start(0);
+      }
+
+      // Render frames
+      setExportStatus("Recording video...");
+      
+      let frame = 0;
+      const startTime = performance.now();
+      
+      const renderLoop = () => {
+        return new Promise<void>((resolve) => {
+          const renderNextFrame = () => {
+            if (cancelRef.current) {
+              recorder.stop();
+              if (audioSource) {
+                try { audioSource.stop(); } catch {}
+              }
+              resolve();
+              return;
+            }
+
+            if (frame >= totalFrames) {
+              // Done rendering
+              setTimeout(() => {
+                recorder.stop();
+                if (audioSource) {
+                  try { audioSource.stop(); } catch {}
+                }
+                resolve();
+              }, 100); // Small delay to ensure last frame is captured
+              return;
+            }
+
+            // Calculate visible characters
+            const visibleChars = Math.min(
+              code.length,
+              frame < typingFrames ? Math.floor((frame / typingFrames) * code.length) : code.length
+            );
+
+            // Render the frame
+            renderFrame(ctx, visibleChars, width, height);
+
+            // Update progress
+            const pct = (frame + 1) / totalFrames;
+            setExportProgress(pct * 0.9);
+            if (frame % 30 === 0) {
+              setExportStatus(`Recording... ${Math.round(pct * 100)}%`);
+            }
+
+            frame++;
+
+            // Schedule next frame
+            const elapsed = performance.now() - startTime;
+            const targetTime = frame * frameInterval;
+            const delay = Math.max(0, targetTime - elapsed);
+            
+            setTimeout(renderNextFrame, delay);
+          };
+
+          renderNextFrame();
+        });
+      };
+
+      await renderLoop();
+
+      // Wait for recording to finish
+      setExportStatus("Finalizing video...");
+      setExportProgress(0.95);
+      
+      const videoBlob = await recordingPromise;
+
+      // Cleanup audio
+      if (audioContext) {
+        audioContext.close();
+      }
 
       // Download
-      const data = await ffmpeg.readFile("output.mp4");
-      const finalBlob = new Blob([data as Uint8Array], {
-        type: "video/mp4",
-      });
-      const url = URL.createObjectURL(finalBlob);
+      const url = URL.createObjectURL(videoBlob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${
-        filename.replace(/\.[^/.]+$/, "") || "code_video"
-      }.mp4`;
+      const extension = mimeType.includes("mp4") ? "mp4" : "webm";
+      a.download = `${filename.replace(/\.[^/.]+$/, "") || "code_video"}.${extension}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
       setExportProgress(1);
-      setExportStatus("Done! 🎉");
+      setExportStatus("Done!");
     } catch (error) {
       console.error("Export failed:", error);
       setExportStatus(
-        `Error: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
+        `Error: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     } finally {
       setTimeout(() => {
         setIsExporting(false);
         setExportStatus("");
         setExportProgress(0);
-      }, 3000);
+      }, 2000);
     }
   }, [
     isExporting,
@@ -516,23 +564,28 @@ export function CanvasExporter({
     musicFadeOut,
   ]);
 
+  const handleCancel = useCallback(() => {
+    cancelRef.current = true;
+    setExportStatus("Cancelling...");
+  }, []);
+
   return (
     <div className="flex flex-col gap-3">
       <Button
-        onClick={handleExport}
-        disabled={isExporting}
+        onClick={isExporting ? handleCancel : handleExport}
+        variant={isExporting ? "outline" : "default"}
         className="w-full gap-2"
         size="lg"
       >
         {isExporting ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" />
-            {Math.round(exportProgress * 100)}%
+            {Math.round(exportProgress * 100)}% - Click to Cancel
           </>
         ) : (
           <>
             <Download className="h-4 w-4" />
-            Download MP4 with Music
+            Download Video {musicEnabled ? "with Music" : ""}
           </>
         )}
       </Button>
