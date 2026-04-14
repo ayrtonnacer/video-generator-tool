@@ -137,6 +137,7 @@ export const CodeVideo: React.FC<CodeVideoProps> = ({
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const compositionWidth = 1080;
   
   const themeColors = codeThemes[theme];
   const bgStyle = backgroundStyles[background];
@@ -145,6 +146,7 @@ export const CodeVideo: React.FC<CodeVideoProps> = ({
   const charsPerFrame = typingSpeed / fps;
   const visibleChars = Math.floor(frame * charsPerFrame);
   const visibleCode = code.slice(0, visibleChars);
+  const lineHeight = fontSize * 1.6;
   
   // Highlight the visible code (Python-specific)
   const highlightedCode = useMemo(() => {
@@ -171,6 +173,36 @@ export const CodeVideo: React.FC<CodeVideoProps> = ({
   // Show cursor only while typing
   const isTyping = visibleChars < code.length;
   const showCursor = isTyping || cursorOpacity > 0.5;
+
+  // Keep preview and export in sync: terminal starts compact and grows with typed content.
+  const outerPadding = 40;
+  const maxWindowWidth = 950;
+  const windowWidth = Math.min(compositionWidth - outerPadding * 2, maxWindowWidth);
+  const maxTextWidth = Math.max(1, windowWidth - padding * 2);
+  const approxCharWidth = Math.max(1, fontSize * 0.62);
+  const maxCharsPerLine = Math.max(1, Math.floor(maxTextWidth / approxCharWidth));
+  const wrappedVisibleLines = (() => {
+    if (!visibleCode) return 1;
+    let lines = 1;
+    let col = 0;
+    for (const ch of visibleCode) {
+      if (ch === "\n") {
+        lines++;
+        col = 0;
+        continue;
+      }
+      col++;
+      if (col > maxCharsPerLine) {
+        lines++;
+        col = 1;
+      }
+    }
+    return lines;
+  })();
+  const codeAreaHeight = Math.max(
+    Math.ceil(fontSize * 2.2),
+    Math.ceil(wrappedVisibleLines * lineHeight + fontSize * 0.6)
+  );
   
   // Background color (custom or from style)
   const actualBgColor = background === "custom" && customBackgroundColor 
@@ -296,8 +328,7 @@ export const CodeVideo: React.FC<CodeVideoProps> = ({
           <div
             style={{
               padding: padding,
-              // Keep a small baseline height so the terminal grows naturally with text.
-              minHeight: Math.ceil(fontSize * 2.2),
+              height: codeAreaHeight,
             }}
           >
             <pre
