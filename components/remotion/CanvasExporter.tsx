@@ -372,8 +372,8 @@ export function CanvasExporter({
       const chromeHeight = showWindowChrome ? 44 : 0;
 
       // Match preview behavior: window grows with visible code over time.
-      const codeAreaMinHeight = 400;
       const lineHeight = fontSize * 1.6;
+      const codeAreaMinHeight = Math.ceil(fontSize * 2.2);
       ctx.font = `${fontSize}px ${fontFamily}`;
       const maxTextWidth = windowWidth - padding * 2;
 

@@ -296,7 +296,8 @@ export const CodeVideo: React.FC<CodeVideoProps> = ({
           <div
             style={{
               padding: padding,
-              minHeight: 400,
+              // Keep a small baseline height so the terminal grows naturally with text.
+              minHeight: Math.ceil(fontSize * 2.2),
             }}
           >
             <pre
