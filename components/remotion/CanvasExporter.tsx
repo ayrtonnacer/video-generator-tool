@@ -44,12 +44,41 @@ const canvasThemes = {
 } as const;
 
 const canvasBackgrounds = {
-  "scale-dark": { bg: "#09090b", gradientTop: "#18181b" },
-  "scale-purple": { bg: "#0c0a1d", gradientTop: "#2e1065" },
-  "scale-blue": { bg: "#020617", gradientTop: "#0c4a6e" },
-  midnight: { bg: "#000000", gradientTop: "#111827" },
-  aurora: { bg: "#0f0f23", gradientTop: "#1a1a3e" },
-  custom: { bg: "#000000", gradientTop: "#000000" },
+  // Must match `backgroundStyles` in CodeVideo.tsx as closely as possible.
+  // We translate CSS gradients into Canvas gradients at render time.
+  "scale-dark": {
+    bg: "#09090b",
+    gradientCss: "radial-gradient(ellipse at top, #18181b 0%, #09090b 50%)",
+    pattern: "dots",
+  },
+  "scale-purple": {
+    bg: "#0c0a1d",
+    gradientCss:
+      "radial-gradient(ellipse at top right, #2e1065 0%, #0c0a1d 60%)",
+    pattern: "grid",
+  },
+  "scale-blue": {
+    bg: "#020617",
+    gradientCss:
+      "radial-gradient(ellipse at bottom left, #0c4a6e 0%, #020617 60%)",
+    pattern: "dots",
+  },
+  midnight: {
+    bg: "#000000",
+    gradientCss: "linear-gradient(180deg, #111827 0%, #000000 100%)",
+    pattern: "none",
+  },
+  aurora: {
+    bg: "#0f0f23",
+    gradientCss:
+      "linear-gradient(135deg, #1a1a3e 0%, #0f0f23 50%, #1e3a5f 100%)",
+    pattern: "grid",
+  },
+  custom: {
+    bg: "#000000",
+    gradientCss: "none",
+    pattern: "none",
+  },
 } as const;
 
 // ─── Tokenizer ──────────────────────────────────────────────────────────────
@@ -193,6 +222,131 @@ export function CanvasExporter({
   const bgColors =
     canvasBackgrounds[background] || canvasBackgrounds["scale-dark"];
 
+  const fontFamily =
+    '"JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace';
+
+  const computeCursorOpacity = useCallback(
+    (frame: number) => {
+      const halfPeriodFrames = Math.max(1, Math.round(fps / 2));
+      const quarter = Math.max(1, Math.round(halfPeriodFrames / 2));
+      const m = frame % halfPeriodFrames;
+      // Match Remotion interpolate([0, fps/4, fps/2],[1,1,0]) behavior.
+      if (m <= quarter) return 1;
+      const t = (m - quarter) / Math.max(1, halfPeriodFrames - quarter);
+      return Math.max(0, 1 - t);
+    },
+    [fps]
+  );
+
+  const fillBackground = useCallback(
+    (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+      const actualBg =
+        background === "custom" && customBackgroundColor
+          ? customBackgroundColor
+          : bgColors.bg;
+
+      // Solid base
+      ctx.fillStyle = actualBg;
+      ctx.fillRect(0, 0, width, height);
+
+      // Gradient overlay (approximate CSS gradients from CodeVideo.tsx)
+      const gradientCss =
+        background === "custom" && customBackgroundColor
+          ? `linear-gradient(180deg, ${customBackgroundColor} 0%, ${customBackgroundColor} 100%)`
+          : bgColors.gradientCss;
+
+      if (gradientCss.startsWith("linear-gradient(180deg")) {
+        // top -> bottom
+        const g = ctx.createLinearGradient(0, 0, 0, height);
+        if (background === "custom" && customBackgroundColor) {
+          g.addColorStop(0, customBackgroundColor);
+          g.addColorStop(1, customBackgroundColor);
+        } else if (background === "midnight") {
+          g.addColorStop(0, "#111827");
+          g.addColorStop(1, "#000000");
+        } else {
+          g.addColorStop(0, actualBg);
+          g.addColorStop(1, actualBg);
+        }
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, width, height);
+      } else if (gradientCss.startsWith("linear-gradient(135deg")) {
+        // diagonal: approximate with linear gradient top-left -> bottom-right
+        const g = ctx.createLinearGradient(0, 0, width, height);
+        // Aurora: #1a1a3e 0%, #0f0f23 50%, #1e3a5f 100%
+        g.addColorStop(0, "#1a1a3e");
+        g.addColorStop(0.5, "#0f0f23");
+        g.addColorStop(1, "#1e3a5f");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, width, height);
+      } else if (gradientCss.startsWith("radial-gradient")) {
+        // Use a radial gradient anchored based on variant.
+        let cx = width / 2;
+        let cy = 0;
+        let inner = Math.min(width, height) * 0.1;
+        let outer = Math.max(width, height) * 0.9;
+
+        if (background === "scale-purple") {
+          cx = width;
+          cy = 0;
+          outer = Math.max(width, height) * 1.1;
+        }
+        if (background === "scale-blue") {
+          cx = 0;
+          cy = height;
+          outer = Math.max(width, height) * 1.1;
+        }
+
+        const g = ctx.createRadialGradient(cx, cy, inner, cx, cy, outer);
+        if (background === "scale-dark") {
+          g.addColorStop(0, "#18181b");
+          g.addColorStop(0.5, "#09090b");
+        } else if (background === "scale-purple") {
+          g.addColorStop(0, "#2e1065");
+          g.addColorStop(0.6, "#0c0a1d");
+        } else if (background === "scale-blue") {
+          g.addColorStop(0, "#0c4a6e");
+          g.addColorStop(0.6, "#020617");
+        } else {
+          g.addColorStop(0, actualBg);
+          g.addColorStop(1, actualBg);
+        }
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      // Pattern overlay
+      const pattern = bgColors.pattern;
+      if (pattern === "dots") {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+        for (let y = 0; y < height; y += 24) {
+          for (let x = 0; x < width; x += 24) {
+            ctx.beginPath();
+            ctx.arc(x, y, 1, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      } else if (pattern === "grid") {
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
+        ctx.lineWidth = 1;
+        const step = 40;
+        for (let y = 0; y <= height; y += step) {
+          ctx.beginPath();
+          ctx.moveTo(0, y + 0.5);
+          ctx.lineTo(width, y + 0.5);
+          ctx.stroke();
+        }
+        for (let x = 0; x <= width; x += step) {
+          ctx.beginPath();
+          ctx.moveTo(x + 0.5, 0);
+          ctx.lineTo(x + 0.5, height);
+          ctx.stroke();
+        }
+      }
+    },
+    [background, customBackgroundColor, bgColors.bg, bgColors.gradientCss, bgColors.pattern]
+  );
+
   // ── renderFrame: draws one frame onto a provided CanvasRenderingContext2D ──
 
   const renderFrame = useCallback(
@@ -202,40 +356,66 @@ export function CanvasExporter({
       width: number,
       height: number
     ) => {
-      // Background
-      const actualBg =
-        background === "custom" && customBackgroundColor
-          ? customBackgroundColor
-          : bgColors.bg;
-      const gradientTop =
-        background === "custom" && customBackgroundColor
-          ? customBackgroundColor
-          : bgColors.gradientTop;
-      const gradient = ctx.createLinearGradient(0, 0, 0, height);
-      gradient.addColorStop(0, gradientTop);
-      gradient.addColorStop(1, actualBg);
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-
-      // Dot pattern
-      ctx.fillStyle = "rgba(255, 255, 255, 0.04)";
-      for (let y = 0; y < height; y += 24)
-        for (let x = 0; x < width; x += 24) {
-          ctx.beginPath();
-          ctx.arc(x, y, 1, 0, Math.PI * 2);
-          ctx.fill();
-        }
+      // Background (match CodeVideo.tsx)
+      fillBackground(ctx, width, height);
 
       // Code window
-      const windowWidth = width - 80;
-      const windowX = 40;
-      const windowY = 200;
+      const outerPadding = 40; // matches CodeVideo AbsoluteFill padding
+      const maxWindowWidth = 950; // matches CodeVideo maxWidth
+      const windowWidth = Math.min(width - outerPadding * 2, maxWindowWidth);
+      const windowX = Math.round((width - windowWidth) / 2);
       const chromeHeight = showWindowChrome ? 44 : 0;
 
+      // Estimate a stable window height based on full code (so it doesn't "grow")
+      const codeAreaMinHeight = 400;
+      const lineHeight = fontSize * 1.6;
+      ctx.font = `${fontSize}px ${fontFamily}`;
+      const maxTextWidth = windowWidth - padding * 2;
+
+      const wrapMeasureLines = (text: string) => {
+        let lines = 1;
+        let current = 0;
+        for (let i = 0; i < text.length; i++) {
+          const ch = text[i];
+          if (ch === "\n") {
+            lines++;
+            current = 0;
+            continue;
+          }
+          const w = ctx.measureText(ch).width;
+          if (current + w > maxTextWidth && current > 0) {
+            lines++;
+            current = 0;
+          }
+          current += w;
+        }
+        return lines;
+      };
+
+      const fullLines = wrapMeasureLines(code || "");
+      const estimatedTextHeight = Math.ceil(fullLines * lineHeight + fontSize);
+      const codeAreaHeight = Math.max(codeAreaMinHeight, estimatedTextHeight);
+      const windowHeight = chromeHeight + padding * 2 + codeAreaHeight;
+
+      const windowY = Math.round((height - windowHeight) / 2);
+
+      // Shadow to match CodeVideo boxShadow feel
+      ctx.save();
+      ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
+      ctx.shadowBlur = 50;
+      ctx.shadowOffsetY = 25;
       ctx.fillStyle = themeColors.background;
       ctx.beginPath();
-      ctx.roundRect(windowX, windowY, windowWidth, height - windowY - 80, 16);
+      ctx.roundRect(windowX, windowY, windowWidth, windowHeight, 16);
       ctx.fill();
+      ctx.restore();
+
+      // subtle border stroke (like 1px rgba(255,255,255,0.05))
+      ctx.strokeStyle = "rgba(255,255,255,0.05)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(windowX, windowY, windowWidth, windowHeight, 16);
+      ctx.stroke();
 
       // Window chrome
       if (showWindowChrome) {
@@ -256,7 +436,7 @@ export function CanvasExporter({
 
         ctx.fillStyle = themeColors.foreground;
         ctx.globalAlpha = 0.6;
-        ctx.font = "14px monospace";
+        ctx.font = `14px ${fontFamily}`;
         ctx.textAlign = "center";
         ctx.fillText(filename, windowX + windowWidth / 2, dotY + 4);
         ctx.globalAlpha = 1;
@@ -266,9 +446,8 @@ export function CanvasExporter({
       // Code text
       const codeX = windowX + padding;
       let codeY = windowY + chromeHeight + padding + fontSize;
-      const lineHeight = fontSize * 1.6;
 
-      ctx.font = `${fontSize}px "JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace`;
+      ctx.font = `${fontSize}px ${fontFamily}`;
 
       const visibleCode = code.slice(0, visibleChars);
       const tokens =
@@ -277,10 +456,30 @@ export function CanvasExporter({
           : tokenizePython(visibleCode);
 
       let currentX = codeX;
+      const maxX = windowX + windowWidth - padding;
       for (const token of tokens) {
         if (token.type === "newline") {
           codeY += lineHeight;
           currentX = codeX;
+          continue;
+        }
+        if (token.type === "whitespace") {
+          // Preserve whitespace but wrap if needed.
+          for (const ch of token.text) {
+            if (ch === "\n") {
+              codeY += lineHeight;
+              currentX = codeX;
+              continue;
+            }
+            const w = ctx.measureText(ch).width;
+            if (currentX + w > maxX && currentX > codeX) {
+              codeY += lineHeight;
+              currentX = codeX;
+            }
+            ctx.fillStyle = themeColors.foreground;
+            ctx.fillText(ch, currentX, codeY);
+            currentX += w;
+          }
           continue;
         }
         switch (token.type) {
@@ -305,8 +504,21 @@ export function CanvasExporter({
           default:
             ctx.fillStyle = themeColors.foreground;
         }
-        ctx.fillText(token.text, currentX, codeY);
-        currentX += ctx.measureText(token.text).width;
+        // Draw with wrapping at window bounds (approx CodeVideo pre-wrap/word-break)
+        for (const ch of token.text) {
+          if (ch === "\n") {
+            codeY += lineHeight;
+            currentX = codeX;
+            continue;
+          }
+          const w = ctx.measureText(ch).width;
+          if (currentX + w > maxX && currentX > codeX) {
+            codeY += lineHeight;
+            currentX = codeX;
+          }
+          ctx.fillText(ch, currentX, codeY);
+          currentX += w;
+        }
       }
 
       // Cursor
@@ -332,6 +544,8 @@ export function CanvasExporter({
       filename,
       themeColors,
       bgColors,
+      fillBackground,
+      fontFamily,
     ]
   );
 
@@ -376,9 +590,16 @@ export function CanvasExporter({
       });
 
       // Calculate frame counts
-      const typingFrames = Math.ceil((code.length / typingSpeed) * fps);
-      const holdFrames = Math.ceil(holdTime * fps);
-      const totalFrames = typingFrames + holdFrames;
+      const safeTypingSpeed = Math.max(1, typingSpeed || 25);
+      const safeHoldTime = Math.max(0, holdTime ?? 2);
+      const safeCodeLength = Math.max(1, code?.length || 1);
+      const charsPerFrame = safeTypingSpeed / fps;
+      const typingFrames = Math.max(
+        1,
+        Math.ceil(safeCodeLength / Math.max(0.0001, charsPerFrame))
+      );
+      const holdFrames = Math.max(0, Math.ceil(fps * safeHoldTime));
+      const totalFrames = Math.max(30, typingFrames + holdFrames);
       const totalDuration = totalFrames / fps;
 
       // Render frames
@@ -386,7 +607,7 @@ export function CanvasExporter({
       for (let frame = 0; frame < totalFrames; frame++) {
         const visibleChars = Math.min(
           code.length,
-          Math.floor((frame / typingFrames) * code.length)
+          Math.floor(frame * charsPerFrame)
         );
 
         renderFrame(ctx, visibleChars, width, height);
