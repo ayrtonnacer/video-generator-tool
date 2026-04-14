@@ -10,6 +10,78 @@ import { fetchFile, toBlobURL } from "@ffmpeg/util";
 
 hljs.registerLanguage("python", python);
 
+async function loadFfmpegInstance(
+  onProgress?: (progress01: number) => void
+): Promise<{
+  ffmpeg: FFmpeg;
+  getFfmpegLogs: () => string;
+}> {
+  const logLines: string[] = [];
+  const attachHandlers = (instance: FFmpeg) => {
+    instance.on("log", ({ message }) => {
+      logLines.push(message);
+      if (logLines.length > 100) logLines.shift();
+    });
+    if (onProgress) {
+      instance.on("progress", ({ progress: p }) => {
+        if (p !== undefined) onProgress(p);
+      });
+    }
+  };
+  const loadFrom = async (instance: FFmpeg, base: string) => {
+    await instance.load({
+      coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript"),
+      wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm"),
+      workerURL: await toBlobURL(
+        `${base}/ffmpeg-core.worker.js`,
+        "text/javascript"
+      ),
+    });
+  };
+  const origin =
+    typeof window !== "undefined" ? window.location.origin : "";
+  const localBase = `${origin}/ffmpeg-core`;
+  const cdnBase = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm";
+
+  let ffmpeg = new FFmpeg();
+  attachHandlers(ffmpeg);
+  try {
+    await loadFrom(ffmpeg, localBase);
+  } catch (localErr) {
+    console.warn(
+      "FFmpeg core load from /ffmpeg-core failed, trying CDN",
+      localErr
+    );
+    logLines.length = 0;
+    ffmpeg = new FFmpeg();
+    attachHandlers(ffmpeg);
+    await loadFrom(ffmpeg, cdnBase);
+  }
+  return {
+    ffmpeg,
+    getFfmpegLogs: () => logLines.slice(-40).join("\n"),
+  };
+}
+
+function buildDirectMp4Args(baseArgs: string[], hasAudio: boolean): string[] {
+  const out = [...baseArgs];
+  out.push(
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-preset",
+    "fast",
+    "-crf",
+    "23"
+  );
+  if (hasAudio) {
+    out.push("-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest");
+  }
+  out.push("-movflags", "+faststart", "output.mp4");
+  return out;
+}
+
 // ─── Theme & background palettes (must match CodeVideo.tsx) ──────────────────
 
 const canvasThemes = {
@@ -578,27 +650,8 @@ export function CanvasExporter({
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas not available");
 
-      // Load FFmpeg
-      const ffmpeg = new FFmpeg();
-
-      ffmpeg.on("progress", ({ progress: p }) => {
-        if (p !== undefined) setExportProgress(0.7 + p * 0.25);
-      });
-
-      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
-      await ffmpeg.load({
-        coreURL: await toBlobURL(
-          `${baseURL}/ffmpeg-core.js`,
-          "text/javascript"
-        ),
-        wasmURL: await toBlobURL(
-          `${baseURL}/ffmpeg-core.wasm`,
-          "application/wasm"
-        ),
-        workerURL: await toBlobURL(
-          `${baseURL}/ffmpeg-core.worker.js`,
-          "text/javascript"
-        ),
+      const { ffmpeg, getFfmpegLogs } = await loadFfmpegInstance((p) => {
+        setExportProgress(0.7 + p * 0.25);
       });
 
       // Calculate frame counts
@@ -646,81 +699,53 @@ export function CanvasExporter({
         "f%05d.png",
       ];
 
-      // Music
+      let hasAudio = false;
       if (musicEnabled) {
         setExportStatus("Adding music…");
         try {
-          const musicRes = await fetch("/background-music.mp3");
+          const musicRes = await fetch("/background-music.wav");
           if (musicRes.ok) {
             const musicBlob = await musicRes.blob();
-            await ffmpeg.writeFile(
-              "audio.mp3",
-              await fetchFile(musicBlob)
-            );
+            await ffmpeg.writeFile("audio.wav", await fetchFile(musicBlob));
 
-            args.push("-i", "audio.mp3", "-t", totalDuration.toString());
+            args.push("-stream_loop", "-1", "-i", "audio.wav");
 
             if (musicFadeOut > 0) {
               const fadeStart = Math.max(0, totalDuration - musicFadeOut);
               args.push(
                 "-filter_complex",
-                `[1:a]afade=t=out:st=${fadeStart}:d=${musicFadeOut}[a]`,
+                `[1:a]afade=t=out:st=${fadeStart}:d=${musicFadeOut}[aout]`,
                 "-map",
                 "0:v",
                 "-map",
-                "[a]"
+                "[aout]"
               );
             } else {
               args.push("-map", "0:v", "-map", "1:a");
             }
+            hasAudio = true;
           }
         } catch (e) {
           console.error("Music fetch failed:", e);
         }
       }
 
-      const buildVideoArgs = (codec: "libx264" | "mpeg4") => {
-        const outputArgs = [...args];
-        if (codec === "libx264") {
-          outputArgs.push(
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-preset",
-            "fast",
-            "-crf",
-            "23",
-            "-movflags",
-            "+faststart",
-            "output.mp4"
-          );
-          return outputArgs;
-        }
-        outputArgs.push(
-          "-c:v",
-          "mpeg4",
-          "-q:v",
-          "2",
-          "-pix_fmt",
-          "yuv420p",
-          "-movflags",
-          "+faststart",
-          "output.mp4"
-        );
-        return outputArgs;
-      };
-
-      // Encode with codec fallback for browsers where libx264 is unavailable
       setExportStatus("Encoding MP4…");
       try {
-        await ffmpeg.exec(buildVideoArgs("libx264"));
-        setUsedCodec("libx264");
+        await ffmpeg.exec(buildDirectMp4Args(args, hasAudio));
+        setUsedCodec(hasAudio ? "libx264+aac" : "libx264");
       } catch (primaryEncodeError) {
-        console.warn("libx264 encoding failed, retrying with mpeg4", primaryEncodeError);
-        setExportStatus("Encoding MP4 (fallback codec)…");
-        await ffmpeg.exec(buildVideoArgs("mpeg4"));
-        setUsedCodec("mpeg4 (fallback)");
+        const tail = getFfmpegLogs();
+        console.error("MP4 encode failed", primaryEncodeError, tail);
+        const base =
+          primaryEncodeError instanceof Error
+            ? primaryEncodeError.message
+            : String(primaryEncodeError);
+        throw new Error(
+          `MP4 encoding failed (needs H.264 in this browser). ${base}${
+            tail ? `\n\nFFmpeg log:\n${tail}` : ""
+          }\n\nTip: try another browser (Chrome/Edge), update it, or use WebM and convert elsewhere.`
+        );
       }
 
       // Download
@@ -813,7 +838,7 @@ export function CanvasExporter({
       // Optional audio mix for WebM fallback
       if (musicEnabled) {
         try {
-          audioEl = new Audio("/background-music.mp3");
+          audioEl = new Audio("/background-music.wav");
           audioEl.crossOrigin = "anonymous";
           audioEl.preload = "auto";
           audioEl.loop = false;
@@ -825,7 +850,7 @@ export function CanvasExporter({
             };
             const onError = () => {
               cleanup();
-              reject(new Error("Could not load background-music.mp3"));
+              reject(new Error("Could not load background-music.wav"));
             };
             const cleanup = () => {
               audioEl?.removeEventListener("canplaythrough", onReady);
@@ -971,26 +996,8 @@ export function CanvasExporter({
     setUsedCodec("");
     setExportStatus("Preparing WebM -> MP4 conversion…");
     try {
-      const ffmpeg = new FFmpeg();
-
-      ffmpeg.on("progress", ({ progress: p }) => {
+      const { ffmpeg, getFfmpegLogs } = await loadFfmpegInstance((p) => {
         if (p !== undefined) setExportProgress(p);
-      });
-
-      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
-      await ffmpeg.load({
-        coreURL: await toBlobURL(
-          `${baseURL}/ffmpeg-core.js`,
-          "text/javascript"
-        ),
-        wasmURL: await toBlobURL(
-          `${baseURL}/ffmpeg-core.wasm`,
-          "application/wasm"
-        ),
-        workerURL: await toBlobURL(
-          `${baseURL}/ffmpeg-core.worker.js`,
-          "text/javascript"
-        ),
       });
 
       await ffmpeg.writeFile("input.webm", await fetchFile(lastWebmBlob));
@@ -1011,32 +1018,50 @@ export function CanvasExporter({
           "aac",
           "-b:a",
           "192k",
+          "-ar",
+          "48000",
           "-movflags",
           "+faststart",
           "converted.mp4",
         ]);
         setUsedCodec("webm->mp4 libx264+aac");
-      } catch (primaryError) {
+      } catch (withAudioErr) {
         console.warn(
-          "WebM->MP4 conversion with libx264 failed, retrying with mpeg4",
-          primaryError
+          "WebM->MP4 with audio failed, retrying video-only",
+          withAudioErr
         );
-        await ffmpeg.exec([
-          "-i",
-          "input.webm",
-          "-c:v",
-          "mpeg4",
-          "-q:v",
-          "2",
-          "-c:a",
-          "aac",
-          "-b:a",
-          "160k",
-          "-movflags",
-          "+faststart",
-          "converted.mp4",
-        ]);
-        setUsedCodec("webm->mp4 mpeg4+aac fallback");
+        try {
+          await ffmpeg.exec([
+            "-i",
+            "input.webm",
+            "-map",
+            "0:v",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-preset",
+            "fast",
+            "-crf",
+            "23",
+            "-movflags",
+            "+faststart",
+            "converted.mp4",
+          ]);
+          setUsedCodec("webm->mp4 libx264 (no audio)");
+        } catch (videoOnlyErr) {
+          const tail = getFfmpegLogs();
+          console.error(videoOnlyErr, tail);
+          const base =
+            videoOnlyErr instanceof Error
+              ? videoOnlyErr.message
+              : String(videoOnlyErr);
+          throw new Error(
+            `WebM to MP4 failed. ${base}${
+              tail ? `\n\nFFmpeg log:\n${tail}` : ""
+            }`
+          );
+        }
       }
 
       const data = await ffmpeg.readFile("converted.mp4");

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "generate:background-audio": "node scripts/generate-background-audio.mjs"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.10",
