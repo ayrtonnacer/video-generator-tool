@@ -371,7 +371,7 @@ export function CanvasExporter({
       const windowX = Math.round((width - windowWidth) / 2);
       const chromeHeight = showWindowChrome ? 44 : 0;
 
-      // Estimate a stable window height based on full code (so it doesn't "grow")
+      // Match preview behavior: window grows with visible code over time.
       const codeAreaMinHeight = 400;
       const lineHeight = fontSize * 1.6;
       ctx.font = `${fontSize}px ${fontFamily}`;
@@ -397,10 +397,13 @@ export function CanvasExporter({
         return lines;
       };
 
-      const fullLines = wrapMeasureLines(code || "");
-      const estimatedTextHeight = Math.ceil(fullLines * lineHeight + fontSize);
+      const visibleCodeForHeight = code.slice(0, visibleChars);
+      const visibleLines = wrapMeasureLines(visibleCodeForHeight || "");
+      const estimatedTextHeight = Math.ceil(visibleLines * lineHeight + fontSize);
       const codeAreaHeight = Math.max(codeAreaMinHeight, estimatedTextHeight);
-      const windowHeight = chromeHeight + padding * 2 + codeAreaHeight;
+      const maxWindowHeight = height - outerPadding * 2;
+      const desiredWindowHeight = chromeHeight + padding * 2 + codeAreaHeight;
+      const windowHeight = Math.min(maxWindowHeight, desiredWindowHeight);
 
       const windowY = Math.round((height - windowHeight) / 2);
 
