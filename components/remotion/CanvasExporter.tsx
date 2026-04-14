@@ -375,32 +375,11 @@ export function CanvasExporter({
       const lineHeight = fontSize * 1.6;
       const codeAreaMinHeight = Math.ceil(fontSize * 2.2);
       ctx.font = `${fontSize}px ${fontFamily}`;
-      const maxTextWidth = windowWidth - padding * 2;
-
-      const approxCharWidth = Math.max(1, fontSize * 0.62);
-      const maxCharsPerLine = Math.max(1, Math.floor(maxTextWidth / approxCharWidth));
-      const countWrappedLines = (text: string) => {
-        if (!text) return 1;
-        let lines = 1;
-        let col = 0;
-        for (const ch of text) {
-          if (ch === "\n") {
-            lines++;
-            col = 0;
-            continue;
-          }
-          col++;
-          if (col > maxCharsPerLine) {
-            lines++;
-            col = 1;
-          }
-        }
-        return lines;
-      };
-
       const visibleCodeForHeight = code.slice(0, visibleChars);
-      const visibleLines = countWrappedLines(visibleCodeForHeight);
-      const estimatedTextHeight = Math.ceil(visibleLines * lineHeight + fontSize * 0.6);
+      const visibleLines = Math.max(1, visibleCodeForHeight.split("\n").length);
+      const estimatedTextHeight = Math.ceil(
+        codeAreaMinHeight + Math.max(0, visibleLines - 1) * lineHeight
+      );
       const codeAreaHeight = Math.max(codeAreaMinHeight, estimatedTextHeight);
       const maxWindowHeight = height - outerPadding * 2;
       const desiredWindowHeight = chromeHeight + padding * 2 + codeAreaHeight;
