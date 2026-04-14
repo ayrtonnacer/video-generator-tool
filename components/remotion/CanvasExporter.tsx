@@ -219,6 +219,7 @@ export function CanvasExporter({
   const [exportStatus, setExportStatus] = useState("");
   const [exportError, setExportError] = useState<string>("");
   const [usedCodec, setUsedCodec] = useState<string>("");
+  const [lastWebmBlob, setLastWebmBlob] = useState<Blob | null>(null);
 
   const themeColors = canvasThemes[theme] || canvasThemes["terminal-dark"];
   const bgColors =
@@ -925,6 +926,7 @@ export function CanvasExporter({
 
       await done;
       const blob = new Blob(chunks, { type: mimeType });
+      setLastWebmBlob(blob);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -974,6 +976,111 @@ export function CanvasExporter({
     renderFrame,
   ]);
 
+  const handleConvertLastWebmToMp4 = useCallback(async () => {
+    if (isExporting || !lastWebmBlob) return;
+    setIsExporting(true);
+    setExportProgress(0);
+    setExportError("");
+    setUsedCodec("");
+    setExportStatus("Preparing WebM -> MP4 conversion…");
+    try {
+      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+      const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
+      const ffmpeg = new FFmpeg();
+
+      ffmpeg.on("progress", ({ progress: p }) => {
+        if (p !== undefined) setExportProgress(p);
+      });
+
+      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+      await ffmpeg.load({
+        coreURL: await toBlobURL(
+          `${baseURL}/ffmpeg-core.js`,
+          "text/javascript"
+        ),
+        wasmURL: await toBlobURL(
+          `${baseURL}/ffmpeg-core.wasm`,
+          "application/wasm"
+        ),
+      });
+
+      await ffmpeg.writeFile("input.webm", await fetchFile(lastWebmBlob));
+      setExportStatus("Converting to MP4…");
+      try {
+        await ffmpeg.exec([
+          "-i",
+          "input.webm",
+          "-c:v",
+          "libx264",
+          "-pix_fmt",
+          "yuv420p",
+          "-preset",
+          "fast",
+          "-crf",
+          "23",
+          "-c:a",
+          "aac",
+          "-b:a",
+          "192k",
+          "-movflags",
+          "+faststart",
+          "converted.mp4",
+        ]);
+        setUsedCodec("webm->mp4 libx264+aac");
+      } catch (primaryError) {
+        console.warn(
+          "WebM->MP4 conversion with libx264 failed, retrying with mpeg4",
+          primaryError
+        );
+        await ffmpeg.exec([
+          "-i",
+          "input.webm",
+          "-c:v",
+          "mpeg4",
+          "-q:v",
+          "2",
+          "-c:a",
+          "aac",
+          "-b:a",
+          "160k",
+          "-movflags",
+          "+faststart",
+          "converted.mp4",
+        ]);
+        setUsedCodec("webm->mp4 mpeg4+aac fallback");
+      }
+
+      const data = await ffmpeg.readFile("converted.mp4");
+      const finalBlob = new Blob([data as Uint8Array], { type: "video/mp4" });
+      const url = URL.createObjectURL(finalBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${
+        filename.replace(/\.[^/.]+$/, "") || "code_video"
+      }-from-webm.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setExportProgress(1);
+      setExportStatus("Converted MP4 downloaded 🎉");
+    } catch (error) {
+      setExportError(describeError(error));
+      setExportStatus(
+        `Conversion failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    } finally {
+      setTimeout(() => {
+        setIsExporting(false);
+        setExportStatus("");
+        setExportProgress(0);
+      }, 3000);
+    }
+  }, [describeError, filename, isExporting, lastWebmBlob]);
+
   return (
     <div className="flex flex-col gap-3">
       <Button
@@ -1001,6 +1108,14 @@ export function CanvasExporter({
         className="w-full gap-2"
       >
         Download WebM Fallback
+      </Button>
+      <Button
+        onClick={handleConvertLastWebmToMp4}
+        disabled={isExporting || !lastWebmBlob}
+        variant="outline"
+        className="w-full gap-2"
+      >
+        Convert last WebM to MP4
       </Button>
       {exportStatus && (
         <p className="text-center text-xs text-muted-foreground">
