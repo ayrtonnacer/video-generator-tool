@@ -217,6 +217,8 @@ export function CanvasExporter({
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState("");
+  const [exportError, setExportError] = useState<string>("");
+  const [usedCodec, setUsedCodec] = useState<string>("");
 
   const themeColors = canvasThemes[theme] || canvasThemes["terminal-dark"];
   const bgColors =
@@ -551,11 +553,33 @@ export function CanvasExporter({
 
   // ── handleExport: renders all frames → FFmpeg → MP4 download ──────────────
 
+  const getTiming = useCallback(() => {
+    const safeTypingSpeed = Math.max(1, typingSpeed || 25);
+    const safeHoldTime = Math.max(0, holdTime ?? 2);
+    const safeCodeLength = Math.max(1, code?.length || 1);
+    const charsPerFrame = safeTypingSpeed / fps;
+    const typingFrames = Math.max(
+      1,
+      Math.ceil(safeCodeLength / Math.max(0.0001, charsPerFrame))
+    );
+    const holdFrames = Math.max(0, Math.ceil(fps * safeHoldTime));
+    const totalFrames = Math.max(30, typingFrames + holdFrames);
+    const totalDuration = totalFrames / fps;
+    return { charsPerFrame, totalFrames, totalDuration };
+  }, [code?.length, fps, holdTime, typingSpeed]);
+
+  const describeError = useCallback((error: unknown) => {
+    if (error instanceof Error) return `${error.name}: ${error.message}`;
+    return String(error);
+  }, []);
+
   const handleExport = useCallback(async () => {
     if (isExporting) return;
     setIsExporting(true);
     setExportProgress(0);
     setExportStatus("Preparing FFmpeg…");
+    setExportError("");
+    setUsedCodec("");
 
     try {
       const width = 1080;
@@ -590,17 +614,7 @@ export function CanvasExporter({
       });
 
       // Calculate frame counts
-      const safeTypingSpeed = Math.max(1, typingSpeed || 25);
-      const safeHoldTime = Math.max(0, holdTime ?? 2);
-      const safeCodeLength = Math.max(1, code?.length || 1);
-      const charsPerFrame = safeTypingSpeed / fps;
-      const typingFrames = Math.max(
-        1,
-        Math.ceil(safeCodeLength / Math.max(0.0001, charsPerFrame))
-      );
-      const holdFrames = Math.max(0, Math.ceil(fps * safeHoldTime));
-      const totalFrames = Math.max(30, typingFrames + holdFrames);
-      const totalDuration = totalFrames / fps;
+      const { charsPerFrame, totalFrames, totalDuration } = getTiming();
 
       // Render frames
       setExportStatus("Rendering frames…");
@@ -677,21 +691,49 @@ export function CanvasExporter({
         }
       }
 
-      args.push(
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-preset",
-        "fast",
-        "-crf",
-        "23",
-        "output.mp4"
-      );
+      const buildVideoArgs = (codec: "libx264" | "mpeg4") => {
+        const outputArgs = [...args];
+        if (codec === "libx264") {
+          outputArgs.push(
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-preset",
+            "fast",
+            "-crf",
+            "23",
+            "-movflags",
+            "+faststart",
+            "output.mp4"
+          );
+          return outputArgs;
+        }
+        outputArgs.push(
+          "-c:v",
+          "mpeg4",
+          "-q:v",
+          "2",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          "output.mp4"
+        );
+        return outputArgs;
+      };
 
-      // Encode
+      // Encode with codec fallback for browsers where libx264 is unavailable
       setExportStatus("Encoding MP4…");
-      await ffmpeg.exec(args);
+      try {
+        await ffmpeg.exec(buildVideoArgs("libx264"));
+        setUsedCodec("libx264");
+      } catch (primaryEncodeError) {
+        console.warn("libx264 encoding failed, retrying with mpeg4", primaryEncodeError);
+        setExportStatus("Encoding MP4 (fallback codec)…");
+        await ffmpeg.exec(buildVideoArgs("mpeg4"));
+        setUsedCodec("mpeg4 (fallback)");
+      }
 
       // Download
       const data = await ffmpeg.readFile("output.mp4");
@@ -710,9 +752,10 @@ export function CanvasExporter({
       URL.revokeObjectURL(url);
 
       setExportProgress(1);
-      setExportStatus("Done! 🎉");
+      setExportStatus("Done! MP4 downloaded 🎉");
     } catch (error) {
       console.error("Export failed:", error);
+      setExportError(describeError(error));
       setExportStatus(
         `Error: ${
           error instanceof Error ? error.message : "Unknown error"
@@ -728,14 +771,113 @@ export function CanvasExporter({
   }, [
     isExporting,
     code,
-    typingSpeed,
-    holdTime,
     fps,
     filename,
     renderFrame,
     musicEnabled,
     musicFadeOut,
+    getTiming,
+    describeError,
   ]);
+
+  const handleWebmFallback = useCallback(async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    setExportProgress(0);
+    setExportError("");
+    setUsedCodec("");
+    setExportStatus("Preparing WebM fallback…");
+
+    try {
+      const width = 1080;
+      const height = 1920;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas not available");
+
+      const mimeCandidates = [
+        "video/webm;codecs=vp9",
+        "video/webm;codecs=vp8",
+        "video/webm",
+      ];
+      const mimeType = mimeCandidates.find((m) =>
+        typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m)
+      );
+      if (!mimeType) {
+        throw new Error("This browser does not support MediaRecorder WebM");
+      }
+
+      const stream = canvas.captureStream(fps);
+      const recorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: 2_500_000,
+      });
+      const chunks: BlobPart[] = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      const { charsPerFrame, totalFrames } = getTiming();
+      let frame = 0;
+
+      const done = new Promise<void>((resolve, reject) => {
+        recorder.onerror = (ev) => {
+          const msg = (ev as unknown as { error?: Error }).error?.message;
+          reject(new Error(msg || "WebM recording failed"));
+        };
+        recorder.onstop = () => resolve();
+      });
+
+      recorder.start(250);
+      setExportStatus("Recording WebM fallback…");
+
+      await new Promise<void>((resolve) => {
+        const interval = Math.max(1, Math.round(1000 / fps));
+        const timer = window.setInterval(() => {
+          if (frame >= totalFrames) {
+            window.clearInterval(timer);
+            recorder.stop();
+            resolve();
+            return;
+          }
+          const visibleChars = Math.min(code.length, Math.floor(frame * charsPerFrame));
+          renderFrame(ctx, visibleChars, width, height);
+          frame += 1;
+          setExportProgress(frame / totalFrames);
+        }, interval);
+      });
+
+      await done;
+      const blob = new Blob(chunks, { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${filename.replace(/\.[^/.]+$/, "") || "code_video"}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setUsedCodec("webm mediarecorder fallback");
+      setExportProgress(1);
+      setExportStatus("WebM fallback downloaded");
+    } catch (error) {
+      setExportError(describeError(error));
+      setExportStatus(
+        `Fallback failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    } finally {
+      setTimeout(() => {
+        setIsExporting(false);
+        setExportStatus("");
+        setExportProgress(0);
+      }, 3000);
+    }
+  }, [code.length, describeError, filename, fps, getTiming, isExporting, renderFrame]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -757,10 +899,33 @@ export function CanvasExporter({
           </>
         )}
       </Button>
+      <Button
+        onClick={handleWebmFallback}
+        disabled={isExporting}
+        variant="outline"
+        className="w-full gap-2"
+      >
+        Download WebM Fallback
+      </Button>
       {exportStatus && (
         <p className="text-center text-xs text-muted-foreground">
           {exportStatus}
         </p>
+      )}
+      {usedCodec && (
+        <p className="text-center text-xs text-muted-foreground">
+          Encoder used: {usedCodec}
+        </p>
+      )}
+      {exportError && (
+        <details className="rounded-md border border-border p-2 text-xs">
+          <summary className="cursor-pointer font-medium">
+            Export error details
+          </summary>
+          <pre className="mt-2 whitespace-pre-wrap break-words text-destructive">
+            {exportError}
+          </pre>
+        </details>
       )}
     </div>
   );
