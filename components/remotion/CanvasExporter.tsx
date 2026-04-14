@@ -612,6 +612,10 @@ export function CanvasExporter({
           `${baseURL}/ffmpeg-core.wasm`,
           "application/wasm"
         ),
+        workerURL: await toBlobURL(
+          `${baseURL}/ffmpeg-core.worker.js`,
+          "text/javascript"
+        ),
       });
 
       // Calculate frame counts
@@ -999,6 +1003,10 @@ export function CanvasExporter({
         wasmURL: await toBlobURL(
           `${baseURL}/ffmpeg-core.wasm`,
           "application/wasm"
+        ),
+        workerURL: await toBlobURL(
+          `${baseURL}/ffmpeg-core.worker.js`,
+          "text/javascript"
         ),
       });
 
