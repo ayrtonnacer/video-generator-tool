@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Download, Loader2 } from "lucide-react";
 import hljs from "highlight.js/lib/core";
 import python from "highlight.js/lib/languages/python";
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { fetchFile, toBlobURL } from "@ffmpeg/util";
 
 hljs.registerLanguage("python", python);
 
@@ -594,8 +596,6 @@ export function CanvasExporter({
       if (!ctx) throw new Error("Canvas not available");
 
       // Load FFmpeg
-      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-      const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
       const ffmpeg = new FFmpeg();
 
       ffmpeg.on("progress", ({ progress: p }) => {
@@ -984,8 +984,6 @@ export function CanvasExporter({
     setUsedCodec("");
     setExportStatus("Preparing WebM -> MP4 conversion…");
     try {
-      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-      const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
       const ffmpeg = new FFmpeg();
 
       ffmpeg.on("progress", ({ progress: p }) => {
