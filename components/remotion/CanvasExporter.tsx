@@ -788,6 +788,9 @@ export function CanvasExporter({
     setUsedCodec("");
     setExportStatus("Preparing WebM fallback…");
 
+    let audioEl: HTMLAudioElement | null = null;
+    let audioCtx: AudioContext | null = null;
+    let audioGain: GainNode | null = null;
     try {
       const width = 1080;
       const height = 1920;
@@ -810,7 +813,59 @@ export function CanvasExporter({
       }
 
       const stream = canvas.captureStream(fps);
-      const recorder = new MediaRecorder(stream, {
+      let audioDestination: MediaStreamAudioDestinationNode | null = null;
+
+      const mixedStream = new MediaStream();
+      const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack) {
+        throw new Error("No video track available from canvas stream");
+      }
+      mixedStream.addTrack(videoTrack);
+
+      // Optional audio mix for WebM fallback
+      if (musicEnabled) {
+        try {
+          audioEl = new Audio("/background-music.mp3");
+          audioEl.crossOrigin = "anonymous";
+          audioEl.preload = "auto";
+          audioEl.loop = false;
+
+          await new Promise<void>((resolve, reject) => {
+            const onReady = () => {
+              cleanup();
+              resolve();
+            };
+            const onError = () => {
+              cleanup();
+              reject(new Error("Could not load background-music.mp3"));
+            };
+            const cleanup = () => {
+              audioEl?.removeEventListener("canplaythrough", onReady);
+              audioEl?.removeEventListener("error", onError);
+            };
+            audioEl?.addEventListener("canplaythrough", onReady, { once: true });
+            audioEl?.addEventListener("error", onError, { once: true });
+          });
+
+          audioCtx = new AudioContext();
+          await audioCtx.resume();
+          const source = audioCtx.createMediaElementSource(audioEl);
+          audioGain = audioCtx.createGain();
+          audioGain.gain.value = 0.3;
+          audioDestination = audioCtx.createMediaStreamDestination();
+          source.connect(audioGain);
+          audioGain.connect(audioDestination);
+          const audioTrack = audioDestination.stream.getAudioTracks()[0];
+          if (audioTrack) {
+            mixedStream.addTrack(audioTrack);
+          }
+        } catch (audioErr) {
+          console.warn("WebM fallback audio unavailable, exporting without music", audioErr);
+          setExportStatus("Recording WebM fallback (without music)…");
+        }
+      }
+
+      const recorder = new MediaRecorder(mixedStream, {
         mimeType,
         videoBitsPerSecond: 2_500_000,
       });
@@ -819,7 +874,7 @@ export function CanvasExporter({
         if (e.data.size > 0) chunks.push(e.data);
       };
 
-      const { charsPerFrame, totalFrames } = getTiming();
+      const { charsPerFrame, totalFrames, totalDuration } = getTiming();
       let frame = 0;
 
       const done = new Promise<void>((resolve, reject) => {
@@ -832,6 +887,14 @@ export function CanvasExporter({
 
       recorder.start(250);
       setExportStatus("Recording WebM fallback…");
+      if (audioEl) {
+        try {
+          audioEl.currentTime = 0;
+          await audioEl.play();
+        } catch (playError) {
+          console.warn("Background music play failed during WebM fallback", playError);
+        }
+      }
 
       await new Promise<void>((resolve) => {
         const interval = Math.max(1, Math.round(1000 / fps));
@@ -841,6 +904,17 @@ export function CanvasExporter({
             recorder.stop();
             resolve();
             return;
+          }
+          if (audioGain && musicFadeOut > 0) {
+            const elapsedSeconds = frame / fps;
+            const fadeStart = Math.max(0, totalDuration - musicFadeOut);
+            if (elapsedSeconds >= fadeStart) {
+              const fadeProgress = Math.min(
+                1,
+                (elapsedSeconds - fadeStart) / Math.max(0.001, musicFadeOut)
+              );
+              audioGain.gain.value = Math.max(0, 0.3 * (1 - fadeProgress));
+            }
           }
           const visibleChars = Math.min(code.length, Math.floor(frame * charsPerFrame));
           renderFrame(ctx, visibleChars, width, height);
@@ -871,13 +945,34 @@ export function CanvasExporter({
         }`
       );
     } finally {
+      if (audioEl) {
+        try {
+          audioEl.pause();
+          audioEl.src = "";
+        } catch {
+          // no-op
+        }
+      }
+      if (audioCtx) {
+        void audioCtx.close().catch(() => {});
+      }
       setTimeout(() => {
         setIsExporting(false);
         setExportStatus("");
         setExportProgress(0);
       }, 3000);
     }
-  }, [code.length, describeError, filename, fps, getTiming, isExporting, renderFrame]);
+  }, [
+    code.length,
+    describeError,
+    filename,
+    fps,
+    getTiming,
+    isExporting,
+    musicEnabled,
+    musicFadeOut,
+    renderFrame,
+  ]);
 
   return (
     <div className="flex flex-col gap-3">
