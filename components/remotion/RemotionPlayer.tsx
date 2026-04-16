@@ -164,8 +164,14 @@ export function RemotionPlayer({
           style={{ width: "100%", height: "100%" }}
           controls={false}
           loop={true}
-          autoPlay={true}
+          autoPlay={false}
           acknowledgeRemotionLicense
+          errorFallback={({ error }) => (
+            <div style={{ color: "red", padding: 16, fontSize: 12, background: "#1a0000", height: "100%", overflow: "auto" }}>
+              <strong>Composition error:</strong>
+              <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>{error.message}</pre>
+            </div>
+          )}
         />
       </div>
       

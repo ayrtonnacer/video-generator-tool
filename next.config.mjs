@@ -18,6 +18,12 @@ const nextConfig = {
           { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
         ],
       },
+      {
+        source: "/ffmpeg-core-mt/ffmpeg-core.wasm",
+        headers: [
+          { key: "Content-Type", value: "application/wasm" },
+        ],
+      },
     ];
   },
 }

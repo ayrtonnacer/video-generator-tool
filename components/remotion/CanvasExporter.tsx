@@ -16,47 +16,40 @@ async function loadFfmpegInstance(
   ffmpeg: FFmpeg;
   getFfmpegLogs: () => string;
 }> {
-  const logLines: string[] = [];
-  const attachHandlers = (instance: FFmpeg) => {
-    instance.on("log", ({ message }) => {
-      logLines.push(message);
-      if (logLines.length > 100) logLines.shift();
-    });
-    if (onProgress) {
-      instance.on("progress", ({ progress: p }) => {
-        if (p !== undefined) onProgress(p);
-      });
-    }
-  };
-  const loadFrom = async (instance: FFmpeg, base: string) => {
-    await instance.load({
-      coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm"),
-      workerURL: await toBlobURL(
-        `${base}/ffmpeg-core.worker.js`,
-        "text/javascript"
-      ),
-    });
-  };
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
-  const localBase = `${origin}/ffmpeg-core-mt`;
-  const cdnBase = "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/esm";
-
-  let ffmpeg = new FFmpeg();
-  attachHandlers(ffmpeg);
-  try {
-    await loadFrom(ffmpeg, localBase);
-  } catch (localErr) {
-    console.warn(
-      "FFmpeg core load from /ffmpeg-core failed, trying CDN",
-      localErr
+  // SharedArrayBuffer is required for @ffmpeg/core-mt (multi-threaded).
+  // It's only available when COOP + COEP headers are correctly set on the page.
+  if (typeof SharedArrayBuffer === "undefined") {
+    const isolated = typeof window !== "undefined" ? window.crossOriginIsolated : false;
+    throw new Error(
+      `SharedArrayBuffer is not available (crossOriginIsolated=${isolated}).\n\n` +
+      "FFmpeg WASM requires Cross-Origin-Opener-Policy: same-origin and " +
+      "Cross-Origin-Embedder-Policy: require-corp headers to be applied by the server.\n\n" +
+      "If you see this error on the deployed site, the hosting provider is likely not forwarding " +
+      "these headers. Use the 'Download WebM Fallback' button as an alternative."
     );
-    logLines.length = 0;
-    ffmpeg = new FFmpeg();
-    attachHandlers(ffmpeg);
-    await loadFrom(ffmpeg, cdnBase);
   }
+
+  const logLines: string[] = [];
+  const ffmpeg = new FFmpeg();
+  ffmpeg.on("log", ({ message }) => {
+    logLines.push(message);
+    if (logLines.length > 100) logLines.shift();
+  });
+  if (onProgress) {
+    ffmpeg.on("progress", ({ progress: p }) => {
+      if (p !== undefined) onProgress(p);
+    });
+  }
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const base = `${origin}/ffmpeg-core-mt`;
+
+  await ffmpeg.load({
+    coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript"),
+    wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm"),
+    workerURL: await toBlobURL(`${base}/ffmpeg-core.worker.js`, "text/javascript"),
+  });
+
   return {
     ffmpeg,
     getFfmpegLogs: () => logLines.slice(-40).join("\n"),
