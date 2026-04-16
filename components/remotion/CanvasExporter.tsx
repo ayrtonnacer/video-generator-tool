@@ -40,8 +40,8 @@ async function loadFfmpegInstance(
   };
   const origin =
     typeof window !== "undefined" ? window.location.origin : "";
-  const localBase = `${origin}/ffmpeg-core`;
-  const cdnBase = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm";
+  const localBase = `${origin}/ffmpeg-core-mt`;
+  const cdnBase = "https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/esm";
 
   let ffmpeg = new FFmpeg();
   attachHandlers(ffmpeg);

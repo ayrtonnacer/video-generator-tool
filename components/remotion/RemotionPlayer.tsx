@@ -133,10 +133,15 @@ export function RemotionPlayer({
   return (
     <div className="flex flex-col gap-4">
       {/* Player container */}
-      <div 
+      <div
         ref={playerContainerRef}
         className={`relative bg-black rounded-lg overflow-hidden ${isFullscreen ? "flex items-center justify-center" : ""}`}
-        style={{ aspectRatio: isFullscreen ? undefined : "9/16", maxHeight: isFullscreen ? "100vh" : "60vh" }}
+        style={{
+          aspectRatio: isFullscreen ? undefined : "9/16",
+          maxHeight: isFullscreen ? "100vh" : "65vh",
+          maxWidth: isFullscreen ? undefined : "calc(65vh * 9 / 16)",
+          margin: "0 auto",
+        }}
       >
         {/* Fullscreen button */}
         <Button
