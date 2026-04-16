@@ -163,8 +163,8 @@ export function RemotionPlayer({
           compositionHeight={1920}
           style={{ width: "100%", height: "100%" }}
           controls={false}
-          loop={false}
-          autoPlay={false}
+          loop={true}
+          autoPlay={true}
           acknowledgeRemotionLicense
         />
       </div>
